@@ -1,5 +1,4 @@
 from enum import StrEnum
-from xmlrpc.client import Boolean
 
 class GameState(StrEnum):
     """
@@ -9,6 +8,22 @@ class GameState(StrEnum):
     WON = "won"
     LOST = "lost"
     ABANDONED = "abandoned"
+
+class PenduError(Exception):
+    """Exception de base pour le jeu."""
+    pass
+
+class InvalidStateError(PenduError):
+    """Action interdite dans l'état actuel de la partie."""
+    pass
+
+class InvalidLetterError(PenduError):
+    """La proposition n'est pas une lettre unique valide."""
+    pass
+
+class LetterAlreadyTriedError(PenduError):
+    """La lettre a déjà été proposée."""
+    pass
 
 class Pendu:
     """
@@ -37,28 +52,56 @@ class Pendu:
         - current_errors : compteur d'erreurs initialisé à 0.
         - state : état initial positionné à GameState.IN_PROGRESS.
         """
-        pass
+        self.secret_word = secret_word.upper().strip()
+        self.guessed_letters = set()
+        self.max_errors = max_errors
+        self.current_errors = 0
+        self.state = GameState.IN_PROGRESS
 
-    def guess(self, letter: str) -> Boolean:
+    def guess(self, letter: str) -> bool:
         """
         Traite la proposition d'une lettre par le joueur.
 
         Règles métier :
-        - Refuser si la partie n'est pas en cours (state != IN_PROGRESS).
-        - Normaliser la lettre (majuscule, caractère unique alphabétique).
-        - Refuser ou ignorer si la lettre a déjà été tentée (présente dans guessed_letters).
-        - Ajouter la lettre à l'ensemble guessed_letters.
-        - Si la lettre n'est pas dans secret_word :
-            * Incrémenter current_errors.
-            * Si current_errors >= max_errors : basculer l'état à GameState.LOST.
-        - Si la lettre est dans secret_word :
-            * Vérifier si toutes les lettres uniques du mot ont été découvertes.
-            * Si oui : basculer l'état à GameState.WON.
-        - Retourner True si la proposition a été prise en compte, False sinon.
+        - Normalise la lettre reçue en majuscule.
+        - Ajoute la lettre à l'ensemble `guessed_letters`.
+        - Si la lettre est absente du mot secret :
+            * Incrémente `current_errors`.
+            * Bascule l'état à `GameState.LOST` si `current_errors >= max_errors`.
+            * Retourne False.
+        - Si la lettre est présente dans le mot secret :
+            * Vérifie si tous les caractères alphabétiques ont été découverts.
+            * Bascule l'état à `GameState.WON` si le mot est complet.
+            * Retourne True.
+
+        Exceptions levées :
+        - InvalidStateError : Si la partie n'est pas en cours (`state != IN_PROGRESS`).
+        - InvalidLetterError : Si l'entrée n'est pas un caractère alphabétique unique.
+        - LetterAlreadyTriedError : Si la lettre a déjà été proposée.
         """
-        pass
-            
-            
+        if self.state != GameState.IN_PROGRESS:
+            raise InvalidStateError("La partie n'est pas en cours.")
+
+        letter = letter.upper()
+        if len(letter) != 1 or not letter.isalpha():
+            raise InvalidLetterError("Une seule lettre alphabétique est attendue.")
+
+        if letter in self.guessed_letters:
+            raise LetterAlreadyTriedError(f"La lettre '{letter}' a déjà été essayée.")
+
+        self.guessed_letters.add(letter)
+
+        if letter not in self.secret_word:
+            self.current_errors += 1
+            if self.current_errors >= self.max_errors:
+                self.state = GameState.LOST
+            return False  # Lettre absente (erreur comptabilisée)
+
+        # Lettre présente : vérification de victoire
+        if all(c in self.guessed_letters for c in self.secret_word if c.isalpha()):
+            self.state = GameState.WON
+
+        return True  # Bonne pioche
 
     def get_masked_word(self) -> str:
         """
@@ -70,9 +113,15 @@ class Pendu:
             * Sinon : afficher un tiret bas '_'.
         - Joindre les caractères par un espace (ex. '_ E _ E') pour faciliter la lecture côté client.
         """
-        pass
+        res = []
+        for c in self.secret_word:
+            if c in self.guessed_letters or not c.isalpha():
+                res.append(c)
+            else:
+                res.append("_")
+        return " ".join(res)
 
-    def is_finished(self) -> Boolean:
+    def is_finished(self) -> bool:
         """
         Indique si la partie est terminée.
 
