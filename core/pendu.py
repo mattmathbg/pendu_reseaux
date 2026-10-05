@@ -129,4 +129,6 @@ class Pendu:
         - True si l'état courant est WON, LOST ou ABANDONED.
         - False si l'état est IN_PROGRESS.
         """
-        pass
+        if self.state in {GameState.WON, GameState.LOST, GameState.ABANDONED}:
+            return True
+        return False
