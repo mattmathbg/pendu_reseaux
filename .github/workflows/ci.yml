@@ -1,0 +1,30 @@
+name: CI Tests
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Configurer l'environnement Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Exécuter la suite de tests
+        run: |
+          # PYTHONPATH=. permet à pytest de résoudre 'import core.pendu'
+          PYTHONPATH=. pytest -v

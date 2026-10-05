@@ -118,7 +118,7 @@ class Pendu:
             if c in self.guessed_letters or not c.isalpha():
                 res.append(c)
             else:
-                res.append("_")
+                res.append("t")
         return " ".join(res)
 
     def is_finished(self) -> bool:
