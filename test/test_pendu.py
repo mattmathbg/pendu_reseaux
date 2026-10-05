@@ -63,5 +63,5 @@ def test_action_after_game_over(game: Pendu):
     with pytest.raises(InvalidStateError):
         game.guess("P")
         
-def test_masked_word():
+def test_masked_word(game: Pendu):
     assert game.get_masked_word() == "_ _ _ _ _ _"
