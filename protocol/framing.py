@@ -1,4 +1,7 @@
 class StreamFramer:
+     """
+     encapsule le message et le delimite avec \n et le transforme en octet pour l'envoyer avec TCP.
+     """
      def __init__(self, delimiter: bytes = b"\n") -> None:
         self.buffer = bytearray()
         self.delimiter = delimiter

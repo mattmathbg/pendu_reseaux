@@ -7,6 +7,8 @@ class ProtocolError(Exception):
 
 @dataclass
 class Message:
+     
+     
      type: str
      request_id: int
      session_id: str | None = None
