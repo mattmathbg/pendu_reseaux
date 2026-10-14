@@ -60,6 +60,7 @@ class Server:
                         
                         # on encode et on envoie la réponse
                         writer.write(framer.frame(response.serialize()))
+                        #attend que le buffer soit vidé avant de continuer
                         await writer.drain()
                         
                     except ProtocolError as e:
