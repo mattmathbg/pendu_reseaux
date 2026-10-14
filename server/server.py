@@ -3,6 +3,9 @@ from protocol.framing import StreamFramer
 from protocol.message import Message, ProtocolError
 
 class Server:
+    def __init__(self, host: str = "127.0.0.1", port: int = 8888) -> None:
+        self.host = host
+        self.port = port
 
     def send_message(self, msg_dict: dict, framer: StreamFramer) -> bytes:
         # 1. On crée l'objet Message à partir du dictionnaire
@@ -84,6 +87,8 @@ class Server:
             print(f"Serveur Pendu démarré sur {addrs}")
             async with server:
                 await server.serve_forever()
+
+
 
 if __name__ == "__main__":
     srv = Server(host="127.0.0.1", port=8888)
