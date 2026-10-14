@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from server.server import Server  # Importe ta classe Server
+from server.server import Server  
 from protocol.framing import StreamFramer
 from protocol.message import Message
 
@@ -44,7 +44,7 @@ async def test_server_recv_and_response():
         
         # 6. Asserts (Vérifications)
         assert response_msg.request_id == 42
-        assert response_msg.type == "Type = NEW_GAME"  # D'après ton code : type="Type = "+message_obj.type
+        assert response_msg.type == "Type = NEW_GAME"  
         assert response_msg.payload == {"status": "OK"}
         
         # 7. Fermeture propre du client
