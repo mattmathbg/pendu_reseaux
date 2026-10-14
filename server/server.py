@@ -8,7 +8,7 @@ class Server:
         self.port = port
 
     def send_message(self, msg_dict: dict, framer: StreamFramer) -> bytes:
-        # 1. On crée l'objet Message à partir du dictionnaire
+        # On crée l'objet Message à partir du dictionnaire
         msg_obj = Message(
             type=msg_dict["type"],
             request_id=msg_dict["request_id"],
