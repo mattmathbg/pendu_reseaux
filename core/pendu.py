@@ -1,5 +1,4 @@
 from enum import StrEnum
-from unidecode import unidecode 
 
 class GameState(StrEnum):
     """
@@ -53,7 +52,7 @@ class Pendu:
         - current_errors : compteur d'erreurs initialisé à 0.
         - state : état initial positionné à GameState.IN_PROGRESS.
         """
-        self.secret_word = unidecode(secret_word).upper().strip()
+        self.secret_word = secret_word.upper().strip()
         self.guessed_letters = set()
         self.max_errors = max_errors
         self.current_errors = 0
