@@ -1,5 +1,5 @@
 
-from time import time
+import time
 import uuid
 
 from core.pendu import Pendu

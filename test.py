@@ -1,8 +1,5 @@
-from core.session import GameSession
-
-session = GameSession(player_name="Alice")
-print(f"Session ID: {session.session_id}")
-print(f"Auth Token: {session.auth_token}")
-print(f"Player Name: {session.player_name}")
-print(f"Is Connected: {session.is_connected}")
-print(f"Disconnect Timestamp: {session.disconnect_timestamp}")
+import socket
+s=socket.create_connection(('127.0.0.1', 8888))
+s.sendall(b'{\"type\":\"HELLO\",\"request_id\":1}\n')
+print('Réponse du serveur :', s.recv(1024))
+s.close()
