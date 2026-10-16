@@ -55,3 +55,33 @@ class GameSession:
           if self.disconnect_timestamp is None:
                return True
           return (time.time() - self.disconnect_timestamp) > timeout
+
+class SessionManager:
+     sessions: dict[str, GameSession]
+     timeout: float     
+     def __init__(self, timeout: float = 60) -> None:
+          self.sessions = {}
+          self.timeout = timeout
+          
+          
+     def create_session(self, player_name: str) -> GameSession:
+          session = GameSession(player_name)
+          self.sessions[session.session_id] = session
+          return session
+     
+     def get_session(self, session_id: str) -> GameSession | None:
+          x = self.sessions.get(session_id)
+          if x and x.is_expired(self.timeout):
+               del self.sessions[session_id]
+               return None
+          return x
+     
+     def clean_expired_sessions(self) -> None:
+          expired_sessions = [session_id for session_id, session in self.sessions.items() if session.is_expired(self.timeout)]
+          for session_id in expired_sessions:
+               del self.sessions[session_id]
+     
+     def remove_session(self, session_id: str) -> None:
+          if session_id in self.sessions:
+               del self.sessions[session_id]
+          
