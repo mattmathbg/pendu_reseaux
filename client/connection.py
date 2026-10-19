@@ -52,3 +52,17 @@ class GameClient:
             if not chunk:
                 raise ConnectionError("Le serveur a fermé la connexion")
             self.framer.feed(chunk)
+
+
+    def new_game(self, player: str) -> Message:
+        resp = self.request("NEW_GAME", {"player": player})
+        if resp.type == "STATE":
+            self.session_id = resp.session_id
+            self.auth_token = resp.payload.get("auth_token")
+        return resp
+
+    def guess(self, letter: str) -> Message:
+        return self.request("LETTER", {"letter": letter})
+
+    def quit_game(self) -> Message:
+        return self.request("QUIT")
