@@ -123,6 +123,10 @@ class Server:
         # 4. Traitement par le dispatcher
         response = await self.dispatcher.dispatch(msg, current_session)
 
+        if msg.type == "QUIT":
+            # La session est supprimée, donc on ne peut plus la renvoyer
+            return response, None 
+        
         # 5. Sauvegarde pour l'idempotence
         current_session.save_response(msg.request_id, response)
 

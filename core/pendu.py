@@ -1,5 +1,10 @@
 from enum import StrEnum
-from core.exceptions import InvalidLetterError, LetterAlreadyTriedError, InvalidStateError
+from core.exceptions import (
+    PenduError,
+    InvalidLetterError,
+    LetterAlreadyTriedError,
+    InvalidStateError,
+)
 
 class GameState(StrEnum):
     """
