@@ -1,5 +1,7 @@
+import argparse
 import asyncio
 import random
+from typing import Any
 
 from core.pendu import (
     Pendu,
@@ -20,8 +22,12 @@ def mot_aleatoire() -> str:
 
 
 class Server:
-    def __init__(self, host: str = "127.0.0.1", port: int = 8888) -> None:
-        self.host = host
+    def __init__(self, host: str | list[str] | None = None, port: int = 8888) -> None:
+        # Par défaut, écoute Dual-Stack en boucle locale (IPv4 et IPv6)
+        if host is None:
+            self.host = ["127.0.0.1", "::1"]
+        else:
+            self.host = host
         self.port = port
         self.sessions = SessionManager(timeout=60)
         self.dispatcher = MessageDispatcher()
@@ -36,12 +42,15 @@ class Server:
         self.dispatcher.register("QUIT")(self._handle_quit)
 
     async def send_message(self, writer: asyncio.StreamWriter, msg: Message) -> None:
-        """Sérialise, encadre avec \n et envoie le message."""
-        writer.write(StreamFramer().frame(msg.serialize()))
+        """Sérialise, encadre avec \\n et envoie le message."""
+        raw = StreamFramer().frame(msg.serialize())
+        writer.write(raw)
         await writer.drain()
 
     async def recv(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Traite le flux TCP pour une connexion client."""
+        peer = writer.get_extra_info("peername")
+        print(f"[SERVEUR] [CONNEXION] Nouveau client connecté : {peer}")
         framer = StreamFramer()
         current_session: GameSession | None = None
 
@@ -49,7 +58,8 @@ class Server:
             while True:
                 chunk = await reader.read(4096)
                 if not chunk:
-                    # Fin de flux TCP (le client s'est déconnecté)
+                    # Fin de flux TCP (le client a fermé la connexion)
+                    print(f"[SERVEUR] [DECONNEXION] Fin de flux TCP pour {peer}")
                     break
 
                 framer.feed(chunk)
@@ -61,9 +71,12 @@ class Server:
 
                     try:
                         message_obj = Message.deserialize(msg_bytes)
+                        print(f"[SERVEUR] [RECU {peer}] Type={message_obj.type} ReqId={message_obj.request_id} Session={message_obj.session_id} Payload={message_obj.payload}")
+
                         response, current_session = await self._dispatch_message(
                             message_obj, current_session
                         )
+                        print(f"[SERVEUR] [ENVOI {peer}] Type={response.type} ReqId={response.request_id} Payload={response.payload}")
                         await self.send_message(writer, response)
 
                     except ProtocolError as e:
@@ -72,14 +85,15 @@ class Server:
                             request_id=0,
                             payload={"code": "BAD_REQUEST", "message": str(e)}
                         )
+                        print(f"[SERVEUR] [ERREUR PROTOCOLE {peer}] {e}")
                         await self.send_message(writer, err_response)
 
         except ConnectionResetError:
-            print("Coupure brutale du client.")
+            print(f"[SERVEUR] [COUPURE] Coupure brutale de la connexion client ({peer}).")
         finally:
             if current_session is not None:
                 current_session.handle_disconnect()
-                print(f"Session {current_session.session_id} suspendue (en attente de RESUME).")
+                print(f"[SERVEUR] [SESSION] Session {current_session.session_id} suspendue (en attente de RESUME sous 60s).")
             writer.close()
             await writer.wait_closed()
 
@@ -109,6 +123,7 @@ class Server:
         # 3. Vérification d'idempotence (requête déjà traitée)
         cached = current_session.get_cached_response(msg.request_id)
         if cached is not None:
+            print(f"[SERVEUR] [IDEMPOTENCE] Cache hit pour request_id={msg.request_id}. Réponse renvoyée sans recalcul.")
             if isinstance(cached, bytes):
                 return Message.deserialize(cached), current_session
             if isinstance(cached, dict):
@@ -175,7 +190,7 @@ class Server:
                 type="STATE",
                 request_id=msg.request_id,
                 session_id=session.session_id,
-                payload={"status": "idle", "message": "Prêt pour une nouvelle partie."}
+                payload={"status": "IDLE", "message": "Prêt pour une nouvelle partie."}
             )
         return response, session
 
@@ -223,16 +238,20 @@ class Server:
 
     def _build_state_message(self, request_id: int, session: GameSession) -> Message:
         game = session.game
+        payload: dict[str, Any] = {
+            "masked_word": game.get_masked_word(),
+            "errors_left": game.max_errors - game.current_errors,
+            "used_letters": sorted(list(game.guessed_letters)),
+            "status": game.state.value,
+        }
+        if game.is_finished():
+            payload["secret_word"] = game.secret_word
+
         return Message(
             type="STATE",
             request_id=request_id,
             session_id=session.session_id,
-            payload={
-                "masked_word": game.get_masked_word(),
-                "errors_left": game.max_errors - game.current_errors,
-                "used_letters": sorted(list(game.guessed_letters)),
-                "status": game.state.value,
-            },
+            payload=payload,
         )
 
     async def _cleanup_loop(self) -> None:
@@ -248,7 +267,7 @@ class Server:
 
         server = await asyncio.start_server(self.recv, self.host, self.port)
         addrs = ", ".join(str(sock.getsockname()) for sock in server.sockets)
-        print(f"Serveur Pendu démarré sur {addrs}")
+        print(f"[SERVEUR] Serveur Pendu démarré sur : {addrs}")
 
         try:
             async with server:
@@ -258,8 +277,13 @@ class Server:
 
 
 if __name__ == "__main__":
-    srv = Server(host="127.0.0.1", port=8888)
+    parser = argparse.ArgumentParser(description="Serveur de Pendu Réseau")
+    parser.add_argument("--host", default=None, help="Adresse d'écoute (défaut : dual-stack 127.0.0.1 et ::1)")
+    parser.add_argument("--port", type=int, default=8888, help="Port d'écoute TCP (défaut : 8888)")
+    args = parser.parse_args()
+
+    srv = Server(host=args.host, port=args.port)
     try:
         asyncio.run(srv.start())
     except KeyboardInterrupt:
-        print("\nArrêt du serveur.")
+        print("\n[SERVEUR] Arrêt du serveur.")

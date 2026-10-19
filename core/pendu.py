@@ -9,11 +9,12 @@ from core.exceptions import (
 class GameState(StrEnum):
     """
     Représente les états possibles du cycle de vie d'une partie de pendu.
+    Standardisés pour le protocole réseau.
     """
-    IN_PROGRESS = "in_progress"
-    WON = "won"
-    LOST = "lost"
-    ABANDONED = "abandoned"
+    IN_PROGRESS = "EN_COURS"
+    WON = "GAGNE"
+    LOST = "PERDU"
+    ABANDONED = "ABANDONNE"
 
 
 class Pendu:

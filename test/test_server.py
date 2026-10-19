@@ -40,7 +40,7 @@ async def test_server_hello_then_new_game():
         framer.feed(chunk)
         state = Message.deserialize(framer.get_next_message())
         assert state.type == "STATE"
-        assert state.payload["status"] == "in_progress"
+        assert state.payload["status"] == "EN_COURS"
         assert "_" in state.payload["masked_word"]
 
         writer.close()

@@ -186,62 +186,30 @@ Victoire   Défaite               └───────────┤
 ## 5. Journal des Tâches — Feuille de Route d'Implémentation
 
 ### Phase 1 : Le Moteur Métier (0 % réseau)
-
-* [ ] Écrire `core/game.py` : logique pure du Pendu (mot masqué, vies décomptées, ensemble de lettres).
-
-
-* [ ] Créer un script de test local vérifiant le comportement sans aucune socket.
-
-
+* [x] Écrire `core/pendu.py` : logique pure du Pendu (mot masqué, vies décomptées, ensemble de lettres).
+* [x] Créer un script de test local vérifiant le comportement sans aucune socket (`test/test_pendu.py`).
 
 ### Phase 2 : Le Protocole & Le Framing
-
-* [ ] Écrire `protocol/framing.py` : classe `StreamFramer` avec méthode `feed()` et buffer d'accumulation.
-
-
-* [ ] Tester les 3 pièges de flux TCP : message fragmenté, messages collés dans un seul buffer, flux vide.
-
-
-* [ ] Écrire `protocol/messages.py` : sérialisation/désérialisation JSON et contrôle des types.
-
-
+* [x] Écrire `protocol/framing.py` : classe `StreamFramer` avec méthode `feed()` et buffer d'accumulation.
+* [x] Tester les 3 pièges de flux TCP : message fragmenté, messages collés dans un seul buffer, flux vide (`test/test_framing.py`).
+* [x] Écrire `protocol/message.py` : sérialisation/désérialisation JSON et contrôle des types (`test/test_message.py`).
 
 ### Phase 3 : Sessions, Résilience & Idempotence
+* [x] Écrire `core/session.py` : gestionnaire associant `session_id`, `auth_token` et cache `{request_id: last_response}`.
+* [x] Implémenter le timer de déconnexion (expiration automatique de la session après 60 s) et le nettoyage asynchrone.
+* [x] Tests unitaires complets sur la gestion des sessions et de l'idempotence (`test/test_session.py`).
 
-
-
-* [ ] Écrire `core/session.py` : gestionnaire associant `session_id`, `auth_token` et cache `{request_id: last_response}`.
-
-
-* [ ] Implémenter le timer de déconnexion (expiration automatique de la session après 60 s).
-
-
-
-### Phase 4 : Serveur Concurrent & Client Minimal
-
-
-
-* [ ] Mettre en place `server.py` avec `asyncio` pour traiter plusieurs connexions en simultané.
-
-
-* [ ] Développer `client.py` en ligne de commande pour manipuler le protocole de bout en bout.
-
-
-* [ ] Tester le scénario de déconnexion brutale (`kill` du client) et reprise via `RESUME`.
-
-
+### Phase 4 : Serveur Concurrent, Clients (GUI/CLI) & Reconnexion
+* [x] Mettre en place `server/server.py` avec `asyncio` pour traiter plusieurs connexions en simultané.
+* [x] Développer `client/connection.py` : gestion de socket, retry transparent, idempotence, sauvegarde de session.
+* [x] Développer `client/gui.py` : interface graphique Tkinter avec dessin dynamique du Pendu, statut réseau et inspecteur de trames.
+* [x] Développer `client/cli.py` : interface en ligne de commande avec art ASCII du pendu et support de reprise.
+* [x] Tester le scénario de déconnexion brutale et reprise via `RESUME` (`test/test_integration.py`).
 
 ### Phase 5 : Extensions Prioritaires (Objectif 20/20)
-
-
-
-* [ ] **Dual-Stack IPv4 / IPv6** : socket configurée pour accepter `127.0.0.1` et `::1` sans distinction.
-
-
+* [x] **Dual-Stack IPv4 / IPv6** : socket serveur configurée pour accepter `127.0.0.1` et `::1` simultanément.
 * [ ] **Chiffrement TLS** : sécuriser la socket avec `ssl.create_default_context()`.
-
-
 * [ ] **Salons & Mode 1v1 (PvP)** : gestion de lobbies via `ROOM_CREATE` et `ROOM_JOIN`.
-
-
 * [ ] **Chat multiplexé** : échange de messages textuels dans la session sans bloquer le jeu.
+
+> 📖 **Consulter le guide détaillé :** Voir [EXPLICATIONS_ARCHITECTURE.md](file:///c:/Users/mmath/Documents/M1/Reseaux/pendu_reseaux/EXPLICATIONS_ARCHITECTURE.md) pour l'explication pas-à-pas du paquet réseau, du framing et de la résilience.
