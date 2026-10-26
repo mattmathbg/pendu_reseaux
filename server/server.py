@@ -108,10 +108,7 @@ class Server:
         if msg.type == "RESUME":
             return await self._handle_resume(msg)
 
-        # 2. Vérification de l'existence de la session
-        if current_session is None and msg.session_id:
-            current_session = self.sessions.get_session(msg.session_id)
-
+    
         if current_session is None:
             err = Message(
                 type="ERROR",

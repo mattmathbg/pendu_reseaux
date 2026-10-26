@@ -261,3 +261,32 @@ def test_real_socket_roundtrip():
         client.close()
         listener.close()
         thread.join(timeout=2)
+
+
+def test_auto_reconnect_replays_original_request(monkeypatch):
+    client = make_client()   # 1re socket : recv() renvoie b"" = coupure
+    client.session_id, client.auth_token, client.auto_reconnect = "S1", "tok", True
+
+    def fake_connect():
+        client.framer = StreamFramer()
+        client.sock = FakeSocket([server_reply(2, status="EN_COURS"),
+                                  server_reply(1, masked_word="_ E _")])
+
+    monkeypatch.setattr(client, "connect", fake_connect)
+
+    response = client.request("LETTER", {"letter": "e"})   # request_id 1
+
+    sent = [Message.deserialize(d.rstrip(b"\n")) for d in client.sock.sent]
+    assert [m.type for m in sent] == ["RESUME", "LETTER"]
+    assert sent[1].request_id == 1                          # même id qu'au départ
+    assert response.request_id == 1
+
+
+def test_send_without_socket_does_not_reconnect_silently(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("connect() ne doit pas être appelé ici")
+
+    monkeypatch.setattr(socket, "create_connection", boom)
+    client = GameClient()          # jamais connecté
+    with pytest.raises(ConnectionError):
+        client._send_and_wait(Message("NEW_GAME", 1))

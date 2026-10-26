@@ -45,3 +45,14 @@ async def test_server_hello_then_new_game():
 
         writer.close()
         await writer.wait_closed()
+
+async def test_letter_with_session_id_but_no_resume_is_refused():
+        srv = Server(port=0)
+        session = srv.sessions.create_session("Alice")
+        msg = Message(type="LETTER", request_id=1,
+                    session_id=session.session_id, payload={"letter": "e"})
+
+        response, returned_session = await srv._dispatch_message(msg, None)
+
+        assert response.type == "ERROR"
+        assert returned_session is None

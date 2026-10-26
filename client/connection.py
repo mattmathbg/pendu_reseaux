@@ -180,6 +180,7 @@ class GameClient:
                         "RECONNEXION",
                         f"Session restaurée. Renvoi de la requête (idempotence id={msg.request_id})...",
                     )
+                    self.last_message = msg
                     return self.retry_last()
                 except Exception as rec_err:
                     self._log("ERREUR", f"Échec reconnexion automatique : {rec_err}")
@@ -195,7 +196,7 @@ class GameClient:
     def _send_and_wait(self, msg: Message) -> Message:
         """Envoi bas-niveau avec encadrement framing et lecture bloquante."""
         if self.sock is None:
-            self.connect()
+              raise ConnectionError("Pas de connexion active")
 
         raw_bytes = self.framer.frame(msg.serialize())
         self._log(
