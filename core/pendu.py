@@ -124,3 +124,13 @@ class Pendu:
         if self.state in {GameState.WON, GameState.LOST, GameState.ABANDONED}:
             return True
         return False
+
+    def abandon(self) -> None:
+        """
+        Marque la partie comme abandonnée.
+
+        Règles :
+        - Change l'état de la partie à ABANDONED.
+        - Ne modifie pas le mot secret ni les lettres déjà devinées.
+        """
+        self.state = GameState.ABANDONED

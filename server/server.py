@@ -1,8 +1,10 @@
 import argparse
 import asyncio
+from csv import writer
 import random
 from typing import Any
 
+from core import pendu
 from core.pendu import (
     Pendu,
     InvalidLetterError,
@@ -70,28 +72,43 @@ class Server:
                         break
 
                     try:
+                        message_obj = None
                         message_obj = Message.deserialize(msg_bytes)
                         print(f"[SERVEUR] [RECU {peer}] Type={message_obj.type} ReqId={message_obj.request_id} Session={message_obj.session_id} Payload={message_obj.payload}")
 
                         response, current_session = await self._dispatch_message(
                             message_obj, current_session
                         )
+                        if message_obj.type in ("HELLO", "RESUME") and response.type != "ERROR":
+                             current_session.owner = writer
                         print(f"[SERVEUR] [ENVOI {peer}] Type={response.type} ReqId={response.request_id} Payload={response.payload}")
                         await self.send_message(writer, response)
 
                     except ProtocolError as e:
+                            err_response = Message(
+                                type="ERROR",
+                                request_id=0,
+                                payload={"code": "BAD_REQUEST", "message": str(e)}
+                            )
+                            print(f"[SERVEUR] [ERREUR PROTOCOLE {peer}] {e}")
+                            await self.send_message(writer, err_response)
+                    except ConnectionError:
+                        raise
+                    except Exception as e:
                         err_response = Message(
                             type="ERROR",
-                            request_id=0,
-                            payload={"code": "BAD_REQUEST", "message": str(e)}
+                            request_id=message_obj.request_id if message_obj is not None else 0,
+                            session_id=current_session.session_id if current_session else None,
+                            payload={"code": "INTERNAL_ERROR", "message": "Erreur interne du serveur."}
                         )
-                        print(f"[SERVEUR] [ERREUR PROTOCOLE {peer}] {e}")
+                        print(f"[SERVEUR] [ERREUR INTERNE {peer}] {e!r}")
                         await self.send_message(writer, err_response)
+                     
 
-        except ConnectionResetError:
-            print(f"[SERVEUR] [COUPURE] Coupure brutale de la connexion client ({peer}).")
+        except ConnectionError:
+            print(f"[SERVEUR] [COUPURE] Connexion client interrompue ({peer}).")
         finally:
-            if current_session is not None:
+            if current_session is not None and current_session.owner is writer:
                 current_session.handle_disconnect()
                 print(f"[SERVEUR] [SESSION] Session {current_session.session_id} suspendue (en attente de RESUME sous 60s).")
             writer.close()
@@ -101,9 +118,28 @@ class Server:
         self, msg: Message, current_session: GameSession | None
     ) -> tuple[Message, GameSession | None]:
         """Aiguille le message, contrôle l'authentification et l'idempotence."""
+        
         # 1. Commandes hors session (connexion / reconnexion)
         if msg.type == "HELLO":
+            if current_session is not None:
+                return (
+                    Message(
+                        type="ERROR",
+                        request_id=msg.request_id,
+                        session_id=current_session.session_id,
+                        payload={
+                            "code": "INVALID_STATE",
+                            "message": "Une session est déjà active sur cette connexion. "
+                                       "Envoyez QUIT avant de renvoyer HELLO.",
+                        },
+                    ),
+                    current_session,   # la connexion garde sa session
+                )
             return await self._handle_hello(msg)
+    
+    
+       
+    
 
         if msg.type == "RESUME":
             return await self._handle_resume(msg)
@@ -193,7 +229,15 @@ class Server:
 
     async def _handle_new_game(self, msg: Message, session: GameSession) -> Message:
         secret = mot_aleatoire()
-        session.game = Pendu(secret_word=secret, max_errors=6)
+        if session.game is None or session.game.is_finished():
+            session.game = Pendu(secret_word=secret, max_errors=6)
+        else:
+            return Message(
+                type="ERROR",
+                request_id=msg.request_id,
+                session_id=session.session_id,
+                payload={"code": "INVALID_STATE", "message": "Une partie est déjà en cours."}
+            )
         return self._build_state_message(msg.request_id, session)
 
     async def _handle_letter(self, msg: Message, session: GameSession) -> Message:
@@ -225,12 +269,17 @@ class Server:
             )
 
     async def _handle_quit(self, msg: Message, session: GameSession) -> Message:
+        if session.game and not session.game.is_finished():
+            session.game.abandon()
         self.sessions.remove_session(session.session_id)
         return Message(
             type="BYE",
             request_id=msg.request_id,
             session_id=session.session_id,
-            payload={"message": "Session fermée avec succès."}
+            payload={
+                "message": "Session fermée avec succès.",
+                "status": session.game.state.value if session.game else None,
+            },
         )
 
     def _build_state_message(self, request_id: int, session: GameSession) -> Message:

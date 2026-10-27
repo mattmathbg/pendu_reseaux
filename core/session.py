@@ -21,6 +21,7 @@ class GameSession:
           self.game = None
           self.is_connected = True
           self.disconnect_timestamp = None
+          self.owner = None
      
      def handle_disconnect(self) -> None:
           """
