@@ -4,6 +4,8 @@ from csv import writer
 import random
 from typing import Any
 
+from requests import session
+
 from core import pendu
 from core.pendu import (
     Pendu,
@@ -88,7 +90,7 @@ class Server:
                             err_response = Message(
                                 type="ERROR",
                                 request_id=0,
-                                payload={"code": "BAD_REQUEST", "message": str(e)}
+                                payload={"code": "INVALID_MESSAGE", "message": str(e)}
                             )
                             print(f"[SERVEUR] [ERREUR PROTOCOLE {peer}] {e}")
                             await self.send_message(writer, err_response)
@@ -149,7 +151,7 @@ class Server:
             err = Message(
                 type="ERROR",
                 request_id=msg.request_id,
-                payload={"code": "UNAUTHORIZED", "message": "Session inconnue ou expirée"}
+                payload={"code": "UNKNOWN_SESSION", "message": "Session inconnue ou expirée"}
             )
             return err, None
 
@@ -203,17 +205,26 @@ class Server:
             return Message(
                 type="ERROR",
                 request_id=msg.request_id,
-                payload={"code": "BAD_REQUEST", "message": "session_id manquant pour RESUME"}
+                payload={"code": "INVALID_MESSAGE", "message": "session_id manquant pour RESUME"}
             ), None
 
         session = self.sessions.get_session(session_id)
-        if session is None or not session.reconnect(auth_token):
+        if session is None :
             return Message(
                 type="ERROR",
                 request_id=msg.request_id,
                 session_id=session_id,
-                payload={"code": "UNAUTHORIZED", "message": "Token invalide ou session expirée"}
+                payload={"code": "UNKNOWN_SESSION", "message": "Session expirée ou inconnue"}
             ), None
+
+        if not session.reconnect(auth_token):
+            return Message(
+                type="ERROR",
+                request_id=msg.request_id,
+                session_id=session_id,
+                payload={"code": "PLAYER_NOT_ALLOWED", "message": "Token invalide"}
+            ), None
+
 
         # Reconnexion validée : on renvoie le STATE courant si une partie existe
         if session.game:
@@ -247,7 +258,7 @@ class Server:
                 request_id=msg.request_id,
                 session_id=session.session_id,
                 payload={
-                    "code": "NO_GAME",
+                    "code": "INVALID_STATE",
                     "message": "Aucune partie lancée. Envoyez NEW_GAME.",
                 },
             )
@@ -256,17 +267,20 @@ class Server:
         try:
             session.game.guess(letter)
             return self._build_state_message(msg.request_id, session)
-        except (
-            InvalidLetterError,
-            LetterAlreadyTriedError,
-            InvalidStateError,
-        ) as exc:
+        except (InvalidLetterError, LetterAlreadyTriedError) as exc:
             return Message(
                 type="ERROR",
                 request_id=msg.request_id,
                 session_id=session.session_id,
-                payload={"code": "INVALID_MOVE", "message": str(exc)},
+                payload={"code": "INVALID_LETTER", "message": str(exc)},
             )
+        except InvalidStateError as exc:
+            return Message( 
+                    type="ERROR",
+                    request_id=msg.request_id,
+                    session_id=session.session_id,
+                    payload={"code": "INVALID_STATE", "message": str(exc)},
+                        )
 
     async def _handle_quit(self, msg: Message, session: GameSession) -> Message:
         if session.game and not session.game.is_finished():

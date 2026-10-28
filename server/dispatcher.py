@@ -26,7 +26,7 @@ class MessageDispatcher:
                 request_id=msg.request_id,
                 session_id=session.session_id,
                 payload={
-                    "code": "UNKNOWN_COMMAND",
+                    "code": "INVALID_MESSAGE",
                     "message": f"Action '{msg.type}' non reconnue."
                 }
             )

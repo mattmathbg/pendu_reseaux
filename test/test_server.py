@@ -3,7 +3,8 @@ import pytest
 from server.server import Server
 from protocol.framing import StreamFramer
 from protocol.message import Message
-from core.pendu import GameState
+from core.pendu import GameState , Pendu
+
 
 @pytest.mark.asyncio
 async def test_server_hello_then_new_game():
@@ -290,6 +291,114 @@ async def test_normal_application_error_is_not_internal_error():
         error = await _read(reader)
         assert error.type == "ERROR"
         assert error.payload["code"] != "INTERNAL_ERROR"
+    finally:
+        for w in writers:
+            w.close()
+        server.close()
+        await server.wait_closed()
+
+async def _session_with_game(srv):
+    """Session avec une partie dont le mot est connu : PYTHON."""
+    session = srv.sessions.create_session("Alice")
+    await srv._dispatch_message(
+        Message(type="NEW_GAME", request_id=1, session_id=session.session_id), session)
+    session.game = Pendu("PYTHON")
+    return session
+
+
+async def test_message_without_session_returns_unknown_session():
+    srv = Server(port=0)
+    response, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=1, payload={"letter": "e"}), None)
+    assert response.payload["code"] == "UNKNOWN_SESSION"
+
+
+async def test_resume_unknown_session_returns_unknown_session():
+    srv = Server(port=0)
+    response, returned = await srv._dispatch_message(
+        Message(type="RESUME", request_id=1, session_id="inconnue",
+                payload={"auth_token": "x"}), None)
+    assert response.payload["code"] == "UNKNOWN_SESSION"
+    assert returned is None
+
+
+async def test_resume_with_wrong_token_returns_player_not_allowed():
+    srv = Server(port=0)
+    session = srv.sessions.create_session("Alice")
+    response, returned = await srv._dispatch_message(
+        Message(type="RESUME", request_id=1, session_id=session.session_id,
+                payload={"auth_token": "faux"}), None)
+    assert response.payload["code"] == "PLAYER_NOT_ALLOWED"
+    assert returned is None
+
+
+async def test_resume_without_session_id_returns_invalid_message():
+    srv = Server(port=0)
+    response, _ = await srv._dispatch_message(
+        Message(type="RESUME", request_id=1, payload={"auth_token": "x"}), None)
+    assert response.payload["code"] == "INVALID_MESSAGE"
+
+
+async def test_unknown_message_type_returns_invalid_message():
+    srv = Server(port=0)
+    session = srv.sessions.create_session("Alice")
+    response, _ = await srv._dispatch_message(
+        Message(type="DANCE", request_id=1, session_id=session.session_id), session)
+    assert response.payload["code"] == "INVALID_MESSAGE"
+
+
+async def test_letter_without_game_returns_invalid_state():
+    srv = Server(port=0)
+    session = srv.sessions.create_session("Alice")
+    response, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=1, session_id=session.session_id,
+                payload={"letter": "a"}), session)
+    assert response.payload["code"] == "INVALID_STATE"
+
+
+async def test_invalid_letter_returns_invalid_letter():
+    srv = Server(port=0)
+    session = await _session_with_game(srv)
+    response, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=2, session_id=session.session_id,
+                payload={"letter": "12"}), session)
+    assert response.payload["code"] == "INVALID_LETTER"
+
+
+async def test_letter_already_tried_returns_invalid_letter():
+    srv = Server(port=0)
+    session = await _session_with_game(srv)
+    sid = session.session_id
+    await srv._dispatch_message(
+        Message(type="LETTER", request_id=2, session_id=sid, payload={"letter": "p"}), session)
+    response, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=3, session_id=sid, payload={"letter": "p"}), session)
+    assert response.payload["code"] == "INVALID_LETTER"
+
+
+async def test_letter_after_game_finished_returns_invalid_state():
+    srv = Server(port=0)
+    session = await _session_with_game(srv)
+    session.game.state = GameState.LOST
+    response, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=2, session_id=session.session_id,
+                payload={"letter": "a"}), session)
+    assert response.payload["code"] == "INVALID_STATE"
+
+
+async def test_malformed_message_returns_invalid_message():
+    srv = Server(host="127.0.0.1", port=0)
+    server = await asyncio.start_server(srv.recv, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    writers = []
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writers.append(writer)
+        writer.write(b"pas du json\n")
+        await writer.drain()
+        error = await _read(reader)
+        assert error.type == "ERROR"
+        assert error.payload["code"] == "INVALID_MESSAGE"
     finally:
         for w in writers:
             w.close()
