@@ -70,8 +70,9 @@ ASCII_HANGMAN = [
 
 def show_state(resp) -> None:
     p = resp.payload
-    errors_left = p.get("errors_left", 6)
-    stage = max(0, min(6, 6 - errors_left))
+    max_errors = p.get("max_errors", 6)
+    errors_left = p.get("errors_left", max_errors)
+    stage = max(0, min(6, max_errors - errors_left))
     print(ASCII_HANGMAN[stage])
     print(f"Mot            : {p.get('masked_word', '')}")
     print(f"Essais restants: {errors_left}")

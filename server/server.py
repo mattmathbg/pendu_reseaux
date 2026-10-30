@@ -303,6 +303,7 @@ class Server:
             "errors_left": game.max_errors - game.current_errors,
             "used_letters": sorted(list(game.guessed_letters)),
             "status": game.state.value,
+            "max_errors": game.max_errors,
         }
         if game.is_finished():
             payload["secret_word"] = game.secret_word

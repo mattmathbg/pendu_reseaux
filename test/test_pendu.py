@@ -65,3 +65,19 @@ def test_action_after_game_over(game: Pendu):
         
 def test_masked_word(game: Pendu):
     assert game.get_masked_word() == "_ _ _ _ _ _"
+
+def test_abandon_sets_state_and_keeps_data():
+    game = Pendu("PYTHON")
+    game.guess("P")
+    game.abandon()
+    assert game.state == GameState.ABANDONED
+    assert game.secret_word == "PYTHON"
+    assert game.guessed_letters == {"P"}
+    assert game.is_finished() is True
+
+
+def test_guess_after_abandon_is_refused():
+    game = Pendu("PYTHON")
+    game.abandon()
+    with pytest.raises(InvalidStateError):
+        game.guess("A")

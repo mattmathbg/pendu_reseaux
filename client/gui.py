@@ -306,10 +306,11 @@ class HangmanApp:
             return
 
         p = resp.payload
+        max_errors = p.get("max_errors", 6)
         self.word_var.set(p.get("masked_word", ""))
-        errors_left = p.get("errors_left", 6)
-        errors_made = max(0, 6 - errors_left)
-        self.info_var.set(f"Essais restants : {errors_left} / 6  (Erreurs : {errors_made})")
+        errors_left = p.get("errors_left", max_errors)
+        errors_made = max(0, max_errors - errors_left)
+        self.info_var.set(f"Essais restants : {errors_left} / {max_errors}  (Erreurs : {errors_made})")
 
         # Mise à jour graphique du pendu
         self._draw_hangman_stage(errors_made)

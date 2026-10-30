@@ -404,3 +404,21 @@ async def test_malformed_message_returns_invalid_message():
             w.close()
         server.close()
         await server.wait_closed()
+
+async def test_state_contains_max_errors():
+    srv = Server(port=0)
+    session = srv.sessions.create_session("Alice")
+    response, _ = await srv._dispatch_message(
+        Message(type="NEW_GAME", request_id=1, session_id=session.session_id), session)
+    assert response.payload["max_errors"] == session.game.max_errors
+    assert response.payload["errors_left"] == response.payload["max_errors"]
+
+
+async def test_max_errors_stays_constant_after_wrong_letter():
+    srv = Server(port=0)
+    session = await _session_with_game(srv)
+    response, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=2, session_id=session.session_id,
+                payload={"letter": "z"}), session)    # Z n'est pas dans PYTHON
+    assert response.payload["max_errors"] == 6        # le total ne bouge pas
+    assert response.payload["errors_left"] == 5       # seul le restant diminue
