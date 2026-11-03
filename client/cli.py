@@ -137,7 +137,7 @@ def main() -> None:
             elif choice == "!RETRY":
                 resp = client.retry_last()
             else:
-                resp = client.guess(choice[0])
+                resp = client.guess(choice)
 
             if resp.type == "ERROR":
                 print(f"[ERREUR APPLICATIVE] {resp.payload.get('code')} : {resp.payload.get('message')}")

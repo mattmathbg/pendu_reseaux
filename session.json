@@ -1,7 +1,5 @@
 {
-  "host": "127.0.0.1",
-  "port": 8888,
-  "player_name": "Joueur",
-  "session_id": "5530af67-4f49-4773-ab1c-483a2d8adddf",
-  "auth_token": "bd39e4b4-ba6b-4173-8b13-60e614106463"
+  "player_name": "joueur",
+  "session_id": "4e96b606-fb5d-48ca-aa9e-11501a3860b0",
+  "auth_token": "6c25fb41-b493-40ea-aab2-9d44bef3af22"
 }

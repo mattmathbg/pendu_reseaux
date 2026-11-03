@@ -100,6 +100,8 @@ class GameClient:
     def quit_game(self) -> Message:
         """Quitte la partie et détruit la session sur le serveur."""
         resp = self.request("QUIT")
+        if os.path.exists("session.json"):
+            os.remove("session.json")
         self.session_id = None
         self.auth_token = None
         self.auto_reconnect = False
@@ -108,8 +110,6 @@ class GameClient:
     def save_session(self, filepath: str = "session.json") -> None:
         """Sauvegarde les jetons de session dans un fichier JSON pour reprise ultérieure."""
         data = {
-            "host": self.host,
-            "port": self.port,
             "player_name": self.player_name,
             "session_id": self.session_id,
             "auth_token": self.auth_token,
@@ -125,8 +125,6 @@ class GameClient:
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.host = data.get("host", self.host)
-            self.port = data.get("port", self.port)
             self.player_name = data.get("player_name", self.player_name)
             self.session_id = data.get("session_id")
             self.auth_token = data.get("auth_token")
