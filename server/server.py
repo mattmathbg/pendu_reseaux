@@ -4,7 +4,6 @@ from csv import writer
 import random
 from typing import Any
 
-from requests import session
 
 from core import pendu
 from core.pendu import (
