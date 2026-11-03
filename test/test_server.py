@@ -4,7 +4,7 @@ from server.server import Server
 from protocol.framing import StreamFramer
 from protocol.message import Message
 from core.pendu import GameState , Pendu
-
+MAX_MESSAGE_SIZE = 8192
 
 @pytest.mark.asyncio
 async def test_server_hello_then_new_game():
@@ -422,3 +422,27 @@ async def test_max_errors_stays_constant_after_wrong_letter():
                 payload={"letter": "z"}), session)    # Z n'est pas dans PYTHON
     assert response.payload["max_errors"] == 6        # le total ne bouge pas
     assert response.payload["errors_left"] == 5       # seul le restant diminue
+
+
+async def test_oversized_message_returns_error_and_closes_connection():
+    srv = Server(host="127.0.0.1", port=0)
+    server = await asyncio.start_server(srv.recv, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    writers = []
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writers.append(writer)
+        writer.write(b"a" * (MAX_MESSAGE_SIZE + 1000))     # pas de \n
+        await writer.drain()
+
+        error = await _read(reader)
+        assert error.type == "ERROR"
+        assert error.payload["code"] == "INVALID_MESSAGE"
+
+        # le serveur a fermé la connexion
+        assert await asyncio.wait_for(reader.read(), timeout=2) == b""
+    finally:
+        for w in writers:
+            w.close()
+        server.close()
+        await server.wait_closed()

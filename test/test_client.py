@@ -290,3 +290,14 @@ def test_send_without_socket_does_not_reconnect_silently(monkeypatch):
     client = GameClient()          # jamais connecté
     with pytest.raises(ConnectionError):
         client._send_and_wait(Message("NEW_GAME", 1))
+
+
+def test_quit_deletes_saved_session_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "session.json").write_text("{}", encoding="utf-8")
+    client = make_client(server_reply(1, "BYE", message="ok"))
+    client.session_id, client.auth_token = "S1", "tok"
+
+    client.quit_game()
+
+    assert not (tmp_path / "session.json").exists()

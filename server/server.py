@@ -69,7 +69,17 @@ class Server:
                 framer.feed(chunk)
 
                 while True:
-                    msg_bytes = framer.get_next_message()
+                    try:
+                        msg_bytes = framer.get_next_message()
+                    except ProtocolError as e:
+                        err_response = Message(
+                            type="ERROR",
+                            request_id=0,
+                            payload={"code": "INVALID_MESSAGE", "message": str(e)},
+                        )
+                        print(f"[SERVEUR] [ERREUR PROTOCOLE {peer}] {e}")
+                        await self.send_message(writer, err_response)
+                        return
                     if msg_bytes is None:
                         break
 

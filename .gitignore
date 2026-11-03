@@ -32,3 +32,6 @@ Thumbs.db
 # Archives temporaires
 *.zip
 *.tar.gz
+
+
+session.json

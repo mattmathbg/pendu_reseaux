@@ -1,7 +1,7 @@
 
 import time
 import uuid
-
+import secrets
 from core.pendu import Pendu
 from protocol.message import Message
 
@@ -22,6 +22,7 @@ class GameSession:
           self.is_connected = True
           self.disconnect_timestamp = None
           self.owner = None
+          self.last_response = None
      
      def handle_disconnect(self) -> None:
           """
@@ -30,8 +31,8 @@ class GameSession:
           self.is_connected = False
           self.disconnect_timestamp = time.time()
      
-     def reconnect(self, auth_token: str) -> None:
-          if auth_token != self.auth_token:
+     def reconnect(self, auth_token: str) -> bool:
+          if not secrets.compare_digest(auth_token, self.auth_token):
                return False
           self.is_connected = True
           self.disconnect_timestamp = None
@@ -44,7 +45,7 @@ class GameSession:
                }
           
      def get_cached_response(self, request_id: int) -> dict | None:
-          if hasattr(self, "last_response") and self.last_response["request_id"] == request_id:
+          if self.last_response is not None and self.last_response["request_id"] == request_id:
                return self.last_response["response"]
      
      def is_expired(self, timeout: float = 60) -> bool:

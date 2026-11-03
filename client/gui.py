@@ -258,6 +258,10 @@ class HangmanApp:
 
     def start_new_game(self) -> None:
         """Lance une nouvelle manche NEW_GAME."""
+
+        if not self.client.session_id:
+            self.start_session(self.client.player_name or "Joueur")
+            return
         # Réinitialisation du clavier
         for btn in self.buttons.values():
             btn.config(state="normal", bg="#ECF0F1", fg="#2C3E50")

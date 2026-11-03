@@ -76,3 +76,31 @@ def test_deserialize_extra_unexpected_keys_ignored():
     msg = Message.deserialize(raw)
     assert msg.type == "NEW_GAME"
     assert msg.request_id == 2
+
+@pytest.mark.parametrize("fields", [
+    {"type": 5, "request_id": 1},
+    {"type": ["LETTER"], "request_id": 1},
+    {"type": None, "request_id": 1},
+    {"type": "LETTER", "request_id": "1"},
+    {"type": "LETTER", "request_id": 1.5},
+    {"type": "LETTER", "request_id": None},
+    {"type": "LETTER", "request_id": True},
+    {"type": "LETTER", "request_id": 1, "session_id": 42},
+    {"type": "LETTER", "request_id": 1, "payload": [1, 2]},
+    {"type": "LETTER", "request_id": 1, "payload": "x"},
+    {"type": "LETTER", "request_id": 1, "payload": None},
+])
+def test_deserialize_wrong_types_are_refused(fields):
+    with pytest.raises(ProtocolError):
+        Message.deserialize(json.dumps(fields).encode("utf-8"))
+
+
+def test_deserialize_minimal_message_gets_defaults():
+    msg = Message.deserialize(b'{"type": "NEW_GAME", "request_id": 3}')
+    assert msg.session_id is None
+    assert msg.payload == {}
+
+
+def test_deserialize_accepts_null_session_id():
+    msg = Message.deserialize(b'{"type": "HELLO", "request_id": 1, "session_id": null}')
+    assert msg.session_id is None
