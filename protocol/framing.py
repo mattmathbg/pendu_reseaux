@@ -1,3 +1,6 @@
+from protocol.message import ProtocolError
+
+MAX_MESSAGE_SIZE = 8192
 class StreamFramer:
      """
      encapsule le message et le delimite avec \n et le transforme en octet pour l'envoyer avec TCP.
@@ -11,7 +14,7 @@ class StreamFramer:
 
           Args:
               data (bytes): la data à rajouter
-          """
+          """                      
           self.buffer.extend(data)
           
      def get_next_message(self) -> bytes | None:
@@ -22,8 +25,15 @@ class StreamFramer:
           """
           delimiter_index = self.buffer.find(self.delimiter)
           if delimiter_index == -1:
-               return None  # Pas encore de fin de message complète
+                # Pas de \n : le message est incomplet. S'il est déjà trop long, il le sera à la fin.
+               if len(self.buffer) > MAX_MESSAGE_SIZE:
+                    raise ProtocolError("Message trop long")
+               return None
 
+          # \n trouvé : le message est complet
+          if delimiter_index > MAX_MESSAGE_SIZE:
+               raise ProtocolError("Message trop long")
+          
           # On extrait tout ce qui se trouve avant le délimiteur
           message = bytes(self.buffer[:delimiter_index])
 
