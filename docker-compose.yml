@@ -9,34 +9,12 @@ services:
       - pendu
     restart: unless-stopped
 
-  client_1:
-    build: .
-    container_name: pendu_client_1
-    # "server" est résolu automatiquement par le serveur DNS intégré de Docker !
-    command: ["python", "-m", "client.cli", "--host", "server", "--port", "8888"]
-    stdin_open: true
-    tty: true
-    depends_on:
-      - server
-    networks:
-      - pendu
-    profiles:
-      - cli
-
-  client_2:
-    build: .
-    container_name: pendu_client_2
-    command: ["python", "-m", "client.cli", "--host", "server", "--port", "8888"]
-    stdin_open: true
-    tty: true
-    depends_on:
-      - server
-    networks:
-      - pendu
-    profiles:
-      - cli
-
 networks:
   pendu:
     name: pendu_bridge
     driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+        - subnet: fd00:dead:beef::/64
