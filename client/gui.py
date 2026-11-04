@@ -1,4 +1,5 @@
 import tkinter as tk
+import time
 from string import ascii_uppercase
 from tkinter import messagebox, scrolledtext, simpledialog
 from typing import Any
@@ -16,6 +17,8 @@ class HangmanApp:
     def __init__(self, root: tk.Tk, client: GameClient) -> None:
         self.root = root
         self.client = client
+        self._timer_started_at: float | None = None
+        self._timer_after_id: str | None = None
         root.title("Pendu Réseau M1 — Client Graphique")
         root.geometry("820x720")
         root.minsize(750, 650)
@@ -78,6 +81,15 @@ class HangmanApp:
             pady=10,
         )
         word_label.pack()
+
+        self.timer_var = tk.StringVar(value="Temps : 00:00")
+        timer_label = tk.Label(
+            right_frame,
+            textvariable=self.timer_var,
+            font=("Segoe UI", 12, "bold"),
+            fg="#2980B9",
+        )
+        timer_label.pack(pady=(0, 5))
 
         self.info_var = tk.StringVar(value="Essais restants : 6 / 6")
         self.info_label = tk.Label(
@@ -175,6 +187,39 @@ class HangmanApp:
     def _set_status(self, text: str, color: str) -> None:
         self.status_canvas.itemconfig(self.status_circle, fill=color)
         self.status_label.config(text=text)
+
+    @staticmethod
+    def _format_elapsed(elapsed: float) -> str:
+        minutes, seconds = divmod(int(elapsed), 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _start_timer(self) -> None:
+        if self._timer_after_id is not None:
+            self.root.after_cancel(self._timer_after_id)
+        self._timer_started_at = time.monotonic()
+        self.timer_var.set("Temps : 00:00")
+        self._timer_after_id = self.root.after(200, self._tick_timer)
+
+    def _tick_timer(self) -> None:
+        self._timer_after_id = None
+        if self._timer_started_at is None:
+            return
+        elapsed = time.monotonic() - self._timer_started_at
+        self.timer_var.set(f"Temps : {self._format_elapsed(elapsed)}")
+        self._timer_after_id = self.root.after(200, self._tick_timer)
+
+    def _stop_timer(self) -> str | None:
+        if self._timer_started_at is None:
+            return None
+
+        elapsed = time.monotonic() - self._timer_started_at
+        self._timer_started_at = None
+        if self._timer_after_id is not None:
+            self.root.after_cancel(self._timer_after_id)
+            self._timer_after_id = None
+        formatted = self._format_elapsed(elapsed)
+        self.timer_var.set(f"Temps : {formatted}")
+        return formatted
 
     def log_network_event(self, direction: str, text: str) -> None:
         """Affiche les échanges réseau dans la console graphique intégrée."""
@@ -287,6 +332,7 @@ class HangmanApp:
         if messagebox.askyesno("Abandonner", "Voulez-vous vraiment abandonner la partie ?"):
             try:
                 resp = self.client.quit_game()
+                self._stop_timer()
                 self._set_status("Session terminée", "#95A5A6")
                 self.info_var.set("Session clôturée.")
                 for btn in self.buttons.values():
@@ -332,12 +378,18 @@ class HangmanApp:
 
         # Vérification fin de partie
         status = p.get("status")
+        if status == "EN_COURS":
+            if self._timer_started_at is None:
+                self._start_timer()
         if status in ("GAGNE", "PERDU", "ABANDONNE"):
+            elapsed = self._stop_timer()
             for btn in self.buttons.values():
                 btn.config(state="disabled")
 
             secret = p.get("secret_word")
             msg = END_MESSAGES.get(status, f"Partie finie : {status}")
+            if elapsed is not None:
+                msg += f"\n\nTemps écoulé : {elapsed}"
             if secret and status == "PERDU":
                 msg += f"\n\nLe mot était : {secret}"
             messagebox.showinfo("Fin de partie", msg)

@@ -1,0 +1,13 @@
+.git
+.github
+.pytest_cache
+**/__pycache__
+*.py[cod]
+test/
+test.py
+.venv/
+venv/
+*.md
+*.png
+*.svg
+session.json

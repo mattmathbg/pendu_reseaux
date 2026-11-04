@@ -4,8 +4,6 @@ from csv import writer
 import random
 from typing import Any
 
-from requests import session
-
 from core import pendu
 from core.pendu import (
     Pendu,
@@ -336,7 +334,7 @@ class Server:
         # Lancement de la tâche de nettoyage
         cleanup_task = asyncio.create_task(self._cleanup_loop())
 
-        server = await asyncio.start_server(self.recv, self.host, self.port)
+        server = await asyncio.start_server(self.recv, "0.0.0.0", self.port)
         addrs = ", ".join(str(sock.getsockname()) for sock in server.sockets)
         print(f"[SERVEUR] Serveur Pendu démarré sur : {addrs}")
 
