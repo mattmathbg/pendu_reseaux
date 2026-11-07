@@ -6,6 +6,22 @@ from protocol.framing import StreamFramer
 from protocol.message import Message
 
 
+#------------------------------------------------------------------------------
+# SSL/TLS support
+#------------------------------------------------------------------------------
+
+import ssl
+from pathlib import Path
+
+def create_client_ssl_context(ca_cert_path: str = "certs/server.crt") -> ssl.SSLContext:
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=ca_cert_path)
+    # Charge le certificat du serveur comme autorité de confiance
+    context.load_verify_locations(cafile=ca_cert_path)
+    # Vérifie que le CN correspond (ex: localhost)
+    context.check_hostname = True
+    return context
+
+
 class GameClient:
     """
     Client de jeu du Pendu au-dessus de TCP.
@@ -16,7 +32,7 @@ class GameClient:
     - Gérer le cycle de vie de session (HELLO, NEW_GAME, RESUME, QUIT).
     - Assurer la tolérance aux pannes avec retry_last et reconnexion automatique (idempotence).
     """
-    def __init__(self, host: str = "127.0.0.1", port: int = 8888, timeout: float = 5.0) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 8888, timeout: float = 5.0, use_tls: bool = False) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -29,6 +45,7 @@ class GameClient:
         self.last_message: Message | None = None
         self.auto_reconnect: bool = False
         self.log_callback: Callable[[str, str], None] | None = None
+        self.use_tls: bool = use_tls  # Indique si la connexion doit utiliser TLS/SSL
 
     def _log(self, direction: str, text: str) -> None:
         if self.log_callback:
@@ -37,8 +54,17 @@ class GameClient:
     def connect(self) -> None:
         """Établit la connexion TCP (supporte nativement IPv4 et IPv6)."""
         self.framer = StreamFramer()
-        self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
-        self._log("CONNEXION", f"Connecté à {self.host}:{self.port}")
+        raw_sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+
+        if self.use_tls:
+            context = create_client_ssl_context()
+            # server_hostname doit correspondre au CN/SAN du certificat (localhost)
+            hostname = self.host if self.host not in ("127.0.0.1", "::1") else "localhost"
+            self.sock = context.wrap_socket(raw_sock, server_hostname=hostname)
+            self._log("CONNEXION", f"Connecté à {self.host}:{self.port} via TLS ({self.sock.version()})")
+        else:
+            self.sock = raw_sock
+            self._log("CONNEXION", f"Connecté à {self.host}:{self.port}")
 
     def close(self) -> None:
         """Ferme la socket TCP proprement."""
@@ -219,3 +245,4 @@ class GameClient:
             if not chunk:
                 raise ConnectionError("Le serveur a fermé la connexion")
             self.framer.feed(chunk)
+            

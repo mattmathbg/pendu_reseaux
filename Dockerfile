@@ -9,6 +9,7 @@ COPY core/ ./core/
 COPY protocol/ ./protocol/
 COPY server/ ./server/
 COPY client/ ./client/
+COPY certs/ ./certs/
 
 EXPOSE 8888/tcp
 

@@ -22,9 +22,24 @@ def mot_aleatoire() -> str:
     mots = ["PYTHON", "ASYNCHRONE", "SOCKET", "SERVEUR", "PROTOCOLE", "RESEAUX"]
     return random.choice(mots)
 
+#---------------------------------------------------------------------
+# SSL/TLS
+#---------------------------------------------------------------------
+
+import ssl
+from pathlib import Path
+
+def create_server_ssl_context(cert_dir: str = "certs") -> ssl.SSLContext:
+    path = Path(cert_dir)
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(
+        certfile=str(path / "server.crt"),
+        keyfile=str(path / "server.key")
+    )
+    return context
 
 class Server:
-    def __init__(self, host: str | list[str] | None = None, port: int = 8888) -> None:
+    def __init__(self, host: str | list[str] | None = None, port: int = 8888, use_tls: bool = False) -> None:
         # Par défaut, écoute Dual-Stack en boucle locale (IPv4 et IPv6)
         if host is None:
             self.host = ["127.0.0.1", "::1"]
@@ -33,9 +48,12 @@ class Server:
         self.port = port
         self.sessions = SessionManager(timeout=60)
         self.dispatcher = MessageDispatcher()
+        self.use_tls = use_tls  # Indique si le serveur doit utiliser TLS/SSL
 
         # Enregistrement dynamique des actions de jeu sur le dispatcher
         self._register_handlers()
+
+
 
     def _register_handlers(self) -> None:
         """Enregistre les méthodes associées aux actions de jeu."""
@@ -334,7 +352,9 @@ class Server:
         # Lancement de la tâche de nettoyage
         cleanup_task = asyncio.create_task(self._cleanup_loop())
 
-        server = await asyncio.start_server(self.recv, "0.0.0.0", self.port)
+        ssl_context = create_server_ssl_context() if self.use_tls else None
+    
+        server = await asyncio.start_server(self.recv, self.host, self.port, ssl=ssl_context)
         addrs = ", ".join(str(sock.getsockname()) for sock in server.sockets)
         print(f"[SERVEUR] Serveur Pendu démarré sur : {addrs}")
 
@@ -349,9 +369,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Serveur de Pendu Réseau")
     parser.add_argument("--host", default=None, help="Adresse d'écoute (défaut : dual-stack 127.0.0.1 et ::1)")
     parser.add_argument("--port", type=int, default=8888, help="Port d'écoute TCP (défaut : 8888)")
+    parser.add_argument("--tls", action="store_true", help="Activer TLS/SSL pour les connexions sécurisées")
     args = parser.parse_args()
 
-    srv = Server(host=args.host, port=args.port)
+    srv = Server(host=args.host, port=args.port, use_tls=args.tls)
     try:
         asyncio.run(srv.start())
     except KeyboardInterrupt:

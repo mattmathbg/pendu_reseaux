@@ -213,13 +213,8 @@ python -m client.gui
 * Jouez via les boutons de lettres.
 * Observez les trames JSON défiler en temps réel dans l'Inspecteur Réseau.
 
-### 3. Lancer l'Interface Ligne de Commande (CLI)
-```powershell
-python -m client.cli
-```
-
-### 4. Exécuter l'Ensemble des Tests Automatisés
+### 3. Exécuter l'Ensemble des Tests Automatisés
 ```powershell
 python -m pytest
 ```
-* 59 tests unitaires et d'intégration validant le framing, les messages, le moteur métier, les sessions, l'idempotence, la reprise après déconnexion et l'IPv6.
+* 118 tests unitaires et d'intégration validant le framing, les messages, le moteur métier, les sessions, l'idempotence, la reprise après déconnexion, l'IHM et l'IPv6.

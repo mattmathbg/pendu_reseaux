@@ -119,8 +119,10 @@ class HangmanApp:
 
     def _init_vars(self) -> None:
         """Initialise les variables d'état et d'affichage."""
+        self._is_busy: bool = False
         self.host_var = tk.StringVar(value=self.client.host or "127.0.0.1")
         self.port_var = tk.StringVar(value=str(self.client.port or 8888))
+        self.tls_var = tk.BooleanVar(value=False)
         self.pseudo_var = tk.StringVar(value=self.client.player_name or "Joueur")
 
         self.word_var = tk.StringVar(value="_ _ _ _ _")
@@ -235,6 +237,9 @@ class HangmanApp:
         # Ligne 2 : Formulaire de connexion dynamique
         form_row = ctk.CTkFrame(header_card, fg_color="transparent")
         form_row.pack(fill="x", padx=14, pady=(0, 10))
+        
+        self.tls_check = ctk.CTkCheckBox(form_row, text="TLS", variable=self.tls_var, width=60, font=ctk.CTkFont(size=12))
+        self.tls_check.pack(side="left", padx=(0, 8))
 
         ctk.CTkLabel(form_row, text="Hôte :", font=ctk.CTkFont(size=12), text_color=THEME["text_secondary"]).pack(side="left", padx=(0, 4))
         self.host_entry = ctk.CTkEntry(form_row, textvariable=self.host_var, width=120, height=28, font=ctk.CTkFont(size=12))
@@ -957,12 +962,18 @@ class HangmanApp:
         on_error: Callable[[Exception], None] | None = None,
     ) -> None:
         """Exécute une opération réseau en arrière-plan sans bloquer CustomTkinter."""
+        if self._is_busy:
+            return
+        self._is_busy = True
+
         def worker() -> None:
             try:
                 res = task(*args)
+                self._gui_queue.put(("CALLBACK", (self._release_busy, ())))
                 if on_success:
                     self._gui_queue.put(("CALLBACK", (on_success, (res,))))
             except Exception as exc:
+                self._gui_queue.put(("CALLBACK", (self._release_busy, ())))
                 if on_error:
                     self._gui_queue.put(("CALLBACK", (on_error, (exc,))))
                 else:
@@ -970,6 +981,10 @@ class HangmanApp:
                     self._gui_queue.put(("ERROR_ALERT", ("Erreur Réseau", str(exc))))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _release_busy(self) -> None:
+        """Réactive la possibilité d'émettre une action réseau."""
+        self._is_busy = False
 
     def _process_gui_queue(self) -> None:
         """Traite les retours réseau et logs sur le thread UI principal."""
@@ -1063,6 +1078,7 @@ class HangmanApp:
             return
 
         pseudo = self.pseudo_var.get().strip() or "Joueur"
+        use_tls = self.tls_var.get()
 
         self._set_status("Connexion en cours...", "#F59E0B")
         self.connect_btn.configure(state="disabled")
@@ -1070,6 +1086,7 @@ class HangmanApp:
         def task():
             self.client.host = host
             self.client.port = port
+            self.client.use_tls = use_tls
             self.client.connect()
             welcome = self.client.hello(pseudo)
             return welcome
@@ -1109,6 +1126,15 @@ class HangmanApp:
             if not self.client.load_session("session.json"):
                 messagebox.showinfo("Aucune session", "Aucune session enregistrée à reprendre.")
                 return
+
+        # Synchronisation des paramètres réseau saisis dans l'IHM
+        self.client.host = self.host_var.get().strip() or "127.0.0.1"
+        try:
+            self.client.port = int(self.port_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Port invalide", "Veuillez entrer un numéro de port valide (ex: 8888).")
+            return
+        self.client.use_tls = self.tls_var.get()
 
         self._set_status("Reprise de session...", "#F59E0B")
 
