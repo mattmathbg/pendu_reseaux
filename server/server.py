@@ -14,6 +14,7 @@ from core.pendu import (
 from core.session import GameSession, SessionManager
 from protocol.framing import StreamFramer
 from protocol.message import Message, ProtocolError
+from protocol.discovery import DiscoveryServer, DEFAULT_DISCOVERY_PORT
 from server.dispatcher import MessageDispatcher
 
 
@@ -39,7 +40,14 @@ def create_server_ssl_context(cert_dir: str = "certs") -> ssl.SSLContext:
     return context
 
 class Server:
-    def __init__(self, host: str | list[str] | None = None, port: int = 8888, use_tls: bool = False) -> None:
+    def __init__(
+        self,
+        host: str | list[str] | None = None,
+        port: int = 8888,
+        use_tls: bool = False,
+        server_name: str = "Serveur Pendu M1",
+        enable_discovery: bool = True,
+    ) -> None:
         # Par défaut, écoute Dual-Stack en boucle locale (IPv4 et IPv6)
         if host is None:
             self.host = ["127.0.0.1", "::1"]
@@ -49,6 +57,19 @@ class Server:
         self.sessions = SessionManager(timeout=60)
         self.dispatcher = MessageDispatcher()
         self.use_tls = use_tls  # Indique si le serveur doit utiliser TLS/SSL
+        self.server_name = server_name
+        self.enable_discovery = enable_discovery
+
+        # Service d'annonce Multicast UDP
+        if self.enable_discovery:
+            self.discovery_server: DiscoveryServer | None = DiscoveryServer(
+                tcp_port=self.port,
+                server_name=self.server_name,
+                use_tls=self.use_tls,
+                get_players_count=lambda: len(self.sessions.sessions),
+            )
+        else:
+            self.discovery_server = None
 
         # Enregistrement dynamique des actions de jeu sur le dispatcher
         self._register_handlers()
@@ -348,9 +369,13 @@ class Server:
             self.sessions.clean_expired_sessions()
 
     async def start(self) -> None:
-        """Démarre le serveur TCP asynchrone."""
+        """Démarre le serveur TCP asynchrone et le répondeur de découverte."""
         # Lancement de la tâche de nettoyage
         cleanup_task = asyncio.create_task(self._cleanup_loop())
+
+        # Démarrage du répondeur UDP Multicast
+        if self.discovery_server:
+            self.discovery_server.start()
 
         ssl_context = create_server_ssl_context() if self.use_tls else None
     
@@ -363,6 +388,8 @@ class Server:
                 await server.serve_forever()
         finally:
             cleanup_task.cancel()
+            if self.discovery_server:
+                self.discovery_server.stop()
 
 
 if __name__ == "__main__":
@@ -370,9 +397,17 @@ if __name__ == "__main__":
     parser.add_argument("--host", default=None, help="Adresse d'écoute (défaut : dual-stack 127.0.0.1 et ::1)")
     parser.add_argument("--port", type=int, default=8888, help="Port d'écoute TCP (défaut : 8888)")
     parser.add_argument("--tls", action="store_true", help="Activer TLS/SSL pour les connexions sécurisées")
+    parser.add_argument("--name", default="Serveur Pendu M1", help="Nom d'affichage du serveur pour la découverte réseau")
+    parser.add_argument("--no-discovery", action="store_true", help="Désactiver l'annonce UDP Multicast")
     args = parser.parse_args()
 
-    srv = Server(host=args.host, port=args.port, use_tls=args.tls)
+    srv = Server(
+        host=args.host,
+        port=args.port,
+        use_tls=args.tls,
+        server_name=args.name,
+        enable_discovery=not args.no_discovery,
+    )
     try:
         asyncio.run(srv.start())
     except KeyboardInterrupt:
