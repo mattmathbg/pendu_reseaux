@@ -13,6 +13,7 @@ import customtkinter as ctk
 
 from client.connection import GameClient
 from protocol.message import Message
+from protocol.discovery import discover_servers
 
 # Résolution des bibliothèques Tcl/Tk sous Windows si nécessaire
 if "TCL_LIBRARY" not in os.environ:
@@ -274,7 +275,20 @@ class HangmanApp:
             text_color=THEME["text_primary"],
             command=self.resume_existing_session,
         )
-        self.resume_btn.pack(side="left", padx=(0, 12))
+        self.resume_btn.pack(side="left", padx=(0, 8))
+
+        self.discover_btn = ctk.CTkButton(
+            form_row,
+            text="🔍 Découvrir",
+            height=28,
+            width=90,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color=THEME["bg_elevated"],
+            hover_color=THEME["bg_hover"],
+            text_color=THEME["accent_primary"],
+            command=self.discover_local_servers,
+        )
+        self.discover_btn.pack(side="left", padx=(0, 12))
 
         # Badge salon actif
         self.room_badge = ctk.CTkLabel(
@@ -1164,6 +1178,110 @@ class HangmanApp:
             messagebox.showwarning("Reprise impossible", f"Erreur de reprise : {exc}")
 
         self._run_async(task, on_success=on_success, on_error=on_error)
+
+    def discover_local_servers(self) -> None:
+        """Sonde le réseau local en UDP Multicast pour trouver les serveurs actifs."""
+        self._set_status("Recherche de serveurs...", "#F59E0B")
+        self._set_feedback("Sondage UDP Multicast (IPv4 & IPv6) du réseau local en cours...")
+        self.discover_btn.configure(state="disabled", text="🔍 Recherche...")
+
+        def on_success(servers: list[dict[str, Any]]) -> None:
+            self.discover_btn.configure(state="normal", text="🔍 Découvrir")
+            if not servers:
+                self._set_status("Aucun serveur trouvé", "#94A3B8")
+                self._set_feedback("Aucun serveur de Pendu détecté sur le réseau local.")
+                messagebox.showinfo(
+                    "Découverte réseau",
+                    "Aucun serveur de Pendu n'a répondu à la sonde UDP Multicast sur le réseau local.\n\n"
+                    "Vérifiez que le serveur est bien démarré sur la machine distante ou locale."
+                )
+                return
+
+            if len(servers) == 1:
+                s = servers[0]
+                self.host_var.set(s["ip"])
+                self.port_var.set(str(s["port"]))
+                if s.get("use_tls"):
+                    self.tls_var.set(True)
+                self._set_status(f"Serveur détecté ({s['ip']})", "#00E676")
+                self._set_feedback(f"Serveur trouvé : {s['server_name']} sur {s['ip']}:{s['port']} !", THEME["accent_success"])
+                messagebox.showinfo(
+                    "Serveur détecté",
+                    f"Serveur trouvé avec succès !\n\n"
+                    f"• Nom : {s['server_name']}\n"
+                    f"• Adresse : {s['ip']}:{s['port']}\n"
+                    f"• Joueurs connectés : {s['players_count']}\n"
+                    f"• Sécurité TLS : {'Oui 🔒' if s.get('use_tls') else 'Non'}\n\n"
+                    "Les champs Hôte et Port ont été pré-remplis automatiquement."
+                )
+            else:
+                self._show_server_picker_dialog(servers)
+
+        def on_error(exc: Exception) -> None:
+            self.discover_btn.configure(state="normal", text="🔍 Découvrir")
+            self._set_status("Erreur découverte", "#FF5252")
+            self._set_feedback(f"Échec sonde Multicast : {exc}", THEME["accent_danger"])
+
+        self._run_async(lambda: discover_servers(timeout=1.2), on_success=on_success, on_error=on_error)
+
+    def _show_server_picker_dialog(self, servers: list[dict[str, Any]]) -> None:
+        """Affiche une boîte de dialogue pour choisir parmi plusieurs serveurs détectés."""
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Serveurs détectés sur le réseau")
+        dialog.geometry("520x340")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ctk.CTkLabel(
+            dialog,
+            text=f"🌐 {len(servers)} serveurs de Pendu détectés :",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=THEME["accent_primary"],
+        ).pack(padx=16, pady=(16, 8), anchor="w")
+
+        scroll = ctk.CTkScrollableFrame(dialog, height=200)
+        scroll.pack(fill="both", expand=True, padx=16, pady=8)
+
+        for s in servers:
+            card = ctk.CTkFrame(scroll, fg_color=THEME["bg_elevated"], corner_radius=8)
+            card.pack(fill="x", pady=4, padx=4)
+
+            info_box = ctk.CTkFrame(card, fg_color="transparent")
+            info_box.pack(side="left", padx=10, pady=8)
+
+            ctk.CTkLabel(
+                info_box,
+                text=s["server_name"],
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=THEME["text_primary"],
+            ).pack(anchor="w")
+
+            tls_info = " • TLS 🔒" if s.get("use_tls") else ""
+            ctk.CTkLabel(
+                info_box,
+                text=f"{s['ip']}:{s['port']} • {s['players_count']} joueur(s){tls_info}",
+                font=ctk.CTkFont(size=11),
+                text_color=THEME["text_secondary"],
+            ).pack(anchor="w")
+
+            def choose_srv(srv=s):
+                self.host_var.set(srv["ip"])
+                self.port_var.set(str(srv["port"]))
+                if srv.get("use_tls"):
+                    self.tls_var.set(True)
+                self._set_status(f"Serveur sélectionné ({srv['ip']})", "#00E676")
+                self._set_feedback(f"Serveur sélectionné : {srv['server_name']}", THEME["accent_success"])
+                dialog.destroy()
+
+            ctk.CTkButton(
+                card,
+                text="Sélectionner",
+                width=90,
+                height=28,
+                fg_color=THEME["accent_primary"],
+                hover_color="#0284C7",
+                command=choose_srv,
+            ).pack(side="right", padx=10, pady=8)
 
     def start_new_game(self) -> None:
         """Lance une nouvelle manche NEW_GAME."""
