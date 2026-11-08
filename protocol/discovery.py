@@ -150,11 +150,13 @@ class DiscoveryServer:
             "use_tls": self.use_tls,
         }
         raw_offer = json.dumps(offer).encode("utf-8")
+        print(f"[DISCOVERY] Sonde reçue de {sender_addr}, envoi offre ({self.server_name}:{self.tcp_port})...")
 
         try:
             sock.sendto(raw_offer, sender_addr)
+            print(f"[DISCOVERY] Offre envoyée avec succès à {sender_addr}")
         except OSError as exc:
-            logger.debug(f"[DISCOVERY] Échec envoi OFFER vers {sender_addr} : {exc}")
+            print(f"[DISCOVERY] Échec envoi OFFER vers {sender_addr} : {exc}")
 
 
 def discover_servers(
@@ -207,16 +209,37 @@ def discover_servers(
     if not sockets:
         return []
 
-    # Émission des sondes sur les canaux multicast
+    # Émission des sondes sur les canaux multicast et broadcast
     if s4:
         try:
             s4.sendto(probe_msg, (MULTICAST_IPV4_GROUP, discovery_port))
         except OSError:
             pass
         try:
-            # Diffusion générale de secours
+            # Diffusion générale de secours (255.255.255.255)
             s4.sendto(probe_msg, ("<broadcast>", discovery_port))
         except OSError:
+            pass
+        try:
+            # Diffusion ciblée : Broadcast dirigé ET Balayage Unicast de sous-réseau
+            # Contourne 100% des restrictions de la box (pas besoin de toucher à la box !)
+            _, _, ips = socket.gethostbyname_ex(socket.gethostname())
+            for ip in ips:
+                parts = ip.split(".")
+                if len(parts) == 4 and not ip.startswith("127."):
+                    # 1. Broadcast dirigé
+                    try:
+                        s4.sendto(probe_msg, (f"{parts[0]}.{parts[1]}.{parts[2]}.255", discovery_port))
+                    except OSError:
+                        pass
+                    # 2. Balayage Unicast direct (ignoré par les filtres multicast des box)
+                    prefix = f"{parts[0]}.{parts[1]}.{parts[2]}"
+                    for host_id in range(1, 255):
+                        try:
+                            s4.sendto(probe_msg, (f"{prefix}.{host_id}", discovery_port))
+                        except OSError:
+                            pass
+        except Exception:
             pass
 
     if s6:
