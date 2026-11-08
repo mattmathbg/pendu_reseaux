@@ -194,22 +194,34 @@ Côté client, `socket.create_connection((host, port))` résout automatiquement 
 
 ---
 
-## 6. Guide de Démarrage Rapide
+## 6. Découverte Automatique de Serveurs (UDP Multicast & Broadcast)
+
+Pour éviter la saisie manuelle d'adresse IP par les joueurs, un service de découverte automatique "Zero-Conf" est intégré :
+* **Service d'annonce UDP en tâche de fond :** Le serveur écoute sur le port UDP `8889` via `DiscoveryServer` et répond aux sondes par un message `OFFER`.
+* **Sondage Multicast Dual-Stack :** Le client émet une sonde `DISCOVER` sur le groupe IPv4 `239.255.42.99`, le groupe IPv6 `ff02::42` (portée Link-Local), ainsi qu'en broadcast de secours `255.255.255.255`.
+* **IHM non-bloquante :** L'interface graphique exécute la recherche dans un thread séparé (`_run_async`), élimine les doublons et pré-remplit les champs de connexion ou ouvre une boîte de sélection si plusieurs serveurs répondent.
+* *Pour les détails complets et les questions types d'examen, consultez le guide dédié :* `EXPLICATIONS_DECOUVERTE_SERVEUR.md`.
+
+---
+
+## 7. Guide de Démarrage Rapide
 
 ### 1. Lancer le Serveur
 ```powershell
 python -m server.server
 ```
 Options disponibles :
-* `python -m server.server --port 9000` (changer le port)
+* `python -m server.server --port 9000` (changer le port TCP)
 * `python -m server.server --host 127.0.0.1` (forcer IPv4 uniquement)
+* `python -m server.server --name "Serveur Pendu Salle 102"` (nom affiché sur le réseau)
+* `python -m server.server --no-discovery` (désactiver l'annonce UDP)
 
 ### 2. Lancer l'Interface Graphique (GUI Tkinter)
 Dans un autre terminal :
 ```powershell
 python -m client.gui
 ```
-* Entrez l'adresse (`127.0.0.1` ou `::1`) et votre pseudo.
+* Cliquez sur **« 🔍 Découvrir »** pour trouver automatiquement le serveur sur le réseau local.
 * Jouez via les boutons de lettres.
 * Observez les trames JSON défiler en temps réel dans l'Inspecteur Réseau.
 
@@ -217,4 +229,4 @@ python -m client.gui
 ```powershell
 python -m pytest
 ```
-* 118 tests unitaires et d'intégration validant le framing, les messages, le moteur métier, les sessions, l'idempotence, la reprise après déconnexion, l'IHM et l'IPv6.
+* 122 tests unitaires et d'intégration validant le framing, les messages, le moteur métier, les sessions, l'idempotence, la reprise après déconnexion, l'IHM, l'IPv6 et la découverte UDP.
