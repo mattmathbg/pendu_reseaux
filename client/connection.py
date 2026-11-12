@@ -9,7 +9,7 @@ from protocol.message import Message
 class GameClient:
     """
     Client de jeu du Pendu au-dessus de TCP.
-    
+
     Responsabilités :
     - Établir et maintenir la connexion TCP (IPv4 / IPv6).
     - Encadrer (framing) et sérialiser les messages JSON via StreamFramer.

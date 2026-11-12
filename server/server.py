@@ -146,10 +146,6 @@ class Server:
                     current_session,   # la connexion garde sa session
                 )
             return await self._handle_hello(msg)
-    
-    
-       
-    
 
         if msg.type == "RESUME":
             return await self._handle_resume(msg)
