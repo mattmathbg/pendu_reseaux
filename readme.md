@@ -199,11 +199,10 @@ Victoire   Défaite               └───────────┤
 * [x] Implémenter le timer de déconnexion (expiration automatique de la session après 60 s) et le nettoyage asynchrone.
 * [x] Tests unitaires complets sur la gestion des sessions et de l'idempotence (`test/test_session.py`).
 
-### Phase 4 : Serveur Concurrent, Clients (GUI/CLI) & Reconnexion
+### Phase 4 : Serveur Concurrent, Client Graphique (GUI) & Reconnexion
 * [x] Mettre en place `server/server.py` avec `asyncio` pour traiter plusieurs connexions en simultané.
 * [x] Développer `client/connection.py` : gestion de socket, retry transparent, idempotence, sauvegarde de session.
-* [x] Développer `client/gui.py` : interface graphique Tkinter avec dessin dynamique du Pendu, statut réseau et inspecteur de trames.
-* [x] Développer `client/cli.py` : interface en ligne de commande avec art ASCII du pendu et support de reprise.
+* [x] Développer `client/gui.py` : interface graphique CustomTkinter avec dessin dynamique du Pendu, statut réseau et inspecteur de trames.
 * [x] Tester le scénario de déconnexion brutale et reprise via `RESUME` (`test/test_integration.py`).
 
 ### Phase 5 : Extensions Prioritaires (Objectif 20/20)
@@ -214,42 +213,30 @@ Victoire   Défaite               └───────────┤
 
 > 📖 **Consulter le guide détaillé :** Voir [EXPLICATIONS_ARCHITECTURE.md](file:///c:/Users/mmath/Documents/M1/Reseaux/pendu_reseaux/EXPLICATIONS_ARCHITECTURE.md) pour l'explication pas-à-pas du paquet réseau, du framing et de la résilience.
 
-## Lancer le jeu avec Docker
+## Lancer le serveur avec Docker
 
-Docker Compose construit une image commune à partir du `Dockerfile`, puis démarre un serveur et deux clients CLI sur le réseau bridge `pendu_bridge`.
+Docker Compose permet de conteneuriser et d'exécuter le serveur asynchrone sur le réseau bridge `pendu_bridge` :
 
-1. Démarrer le serveur depuis la racine du projet :
+1. Démarrer le serveur en arrière-plan :
 
    ```sh
    docker compose up -d --build server
    ```
 
-   Pour afficher ses journaux dans un terminal séparé : `docker compose logs -f server`.
+   Pour afficher ses journaux en temps réel : `docker compose logs -f server`.
 
-2. Dans un premier terminal, démarrer le premier client :
-
-   ```sh
-   docker compose run --rm client_1
-   ```
-
-   À la question `Serveur [127.0.0.1]`, saisir `server`, puis conserver le port `8888`. Le nom `server` est résolu automatiquement par le DNS interne de Docker. Entrer ensuite son pseudo et jouer.
-
-3. Dans un second terminal, démarrer le deuxième client :
+2. Lancer l'interface graphique client (GUI) sur votre machine hôte :
 
    ```sh
-   docker compose run --rm client_2
+   python -m client.gui
    ```
 
-   Saisir également `server` et `8888`. Les deux clients peuvent alors jouer simultanément.
+   Connectez-vous à `127.0.0.1:8888` (le port est exposé sur la machine hôte).
 
-4. Arrêter et supprimer les conteneurs et le réseau :
+3. Arrêter le conteneur serveur :
 
    ```sh
    docker compose down
    ```
 
-Le serveur écoute sur `0.0.0.0` dans son conteneur : c'est nécessaire pour accepter les connexions provenant des autres conteneurs. Le port `8888` est aussi publié sur la machine hôte (`localhost:8888`). Les clients utilisent toutefois le port interne `8888` et le nom `server`, sans dépendre de l'adresse IP d'un conteneur. Les trois services sont construits depuis le même `Dockerfile`.
-
-### Réseau Docker en quelques mots
-
-Chaque conteneur dispose de son propre *network namespace*, qui isole notamment ses interfaces réseau. Docker relie chaque interface du conteneur au bridge Linux avec une paire virtuelle `veth` : une extrémité se trouve dans le conteneur, l'autre sur le bridge. Celui-ci transfère les paquets entre les conteneurs du réseau. Le DNS interne de Docker associe le nom du service Compose (`server`) à l'adresse courante du conteneur serveur ; le client n'a donc pas besoin de connaître ou de configurer cette IP.
+Le serveur écoute sur `0.0.0.0` dans son conteneur afin d'accepter les requêtes transmises depuis l'extérieur du réseau de conteneurs. Le port `8888` est exposé sur la machine hôte (`localhost:8888`).
