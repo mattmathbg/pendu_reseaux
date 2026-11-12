@@ -4,6 +4,7 @@ from csv import writer
 import random
 from typing import Any
 
+
 from core import pendu
 from core.pendu import (
     Pendu,
@@ -81,6 +82,9 @@ class Server:
         self.dispatcher.register("NEW_GAME")(self._handle_new_game)
         self.dispatcher.register("LETTER")(self._handle_letter)
         self.dispatcher.register("QUIT")(self._handle_quit)
+        self.dispatcher.register("JOIN_ROOM")(self._handle_join_room)
+        self.dispatcher.register("LEAVE_ROOM")(self._handle_leave_room)
+        self.dispatcher.register("CHAT")(self._handle_chat)
 
     async def send_message(self, writer: asyncio.StreamWriter, msg: Message) -> None:
         """Sérialise, encadre avec \\n et envoie le message."""
@@ -387,6 +391,100 @@ class Server:
             if self.discovery_server:
                 self.discovery_server.stop()
 
+    async def _push(self, target_session: GameSession, msg: Message) -> None:
+            """Envoie msg à la connexion de target_session, sans jamais bloquer les autres."""
+            if target_session.owner is None or not target_session.is_connected:
+                return
+            try:
+                await self.send_message(target_session.owner, msg)
+            except (ConnectionError, OSError):
+                pass
+
+    async def _handle_join_room(self, msg: Message, session: GameSession) -> Message:
+        room = msg.payload.get("room")
+        if not isinstance(room, str) or not (1 <= len(room) <= 20):
+            return Message(
+                type="ERROR",
+                request_id=msg.request_id,
+                session_id=session.session_id,
+                payload={"code": "INVALID_MESSAGE",
+                        "message": "Le nom du salon doit contenir entre 1 et 20 caractères."},
+            )
+        session.room_id = room
+        return Message(
+            type="ROOM",
+            request_id=msg.request_id,
+            session_id=session.session_id,
+            payload={"room_id": room, "message": f"Vous avez rejoint le salon {room}."},
+        )
+
+    async def _handle_leave_room(self, msg: Message, session: GameSession) -> Message:
+        session.room_id = None
+        return Message(
+            type="ROOM",
+            request_id=msg.request_id,
+            session_id=session.session_id,
+            payload={"room_id": None, "message": "Vous avez quitté le salon."},
+        )
+
+
+    async def _handle_chat(self, msg: Message, session: GameSession) -> Message:
+        text = msg.payload.get("text")
+        if not isinstance(text, str) or not (1 <= len(text.strip()) <= 200):
+            return Message(
+                type="ERROR",
+                request_id=msg.request_id,
+                session_id=session.session_id,
+                payload={"code": "INVALID_MESSAGE",
+                        "message": "Le message doit contenir entre 1 et 200 caractères."},
+            )
+        text = text.strip()
+
+        scope = msg.payload.get("scope")
+        if scope not in ("global", "room"):
+            return Message(
+                type="ERROR",
+                request_id=msg.request_id,
+                session_id=session.session_id,
+                payload={"code": "INVALID_MESSAGE",
+                        "message": "Le scope doit être 'global' ou 'room'."},
+            )
+        if scope == "room" and session.room_id is None:
+            return Message(
+                type="ERROR",
+                request_id=msg.request_id,
+                session_id=session.session_id,
+                payload={"code": "INVALID_STATE",
+                        "message": "Vous n'êtes dans aucun salon."},
+            )
+
+        # Message poussé aux autres : request_id 0, ce n'est pas une réponse
+        push = Message(
+            type="CHAT",
+            request_id=0,
+            payload={"player": session.player_name, "scope": scope,
+                    "room_id": session.room_id, "text": text},
+        )
+
+        for other in list(self.sessions.sessions.values()):
+            if other is session or not other.is_connected:
+                continue
+            if scope == "room" and other.room_id != session.room_id:
+                continue
+            await self._push(other, push)
+
+        # Réponse à l'expéditeur : son request_id
+        return Message(
+            type="CHAT",
+            request_id=msg.request_id,
+            session_id=session.session_id,
+            payload=push.payload,
+        )
+
+
+     
+           
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Serveur de Pendu Réseau")
@@ -408,3 +506,8 @@ if __name__ == "__main__":
         asyncio.run(srv.start())
     except KeyboardInterrupt:
         print("\n[SERVEUR] Arrêt du serveur.")
+
+
+
+
+

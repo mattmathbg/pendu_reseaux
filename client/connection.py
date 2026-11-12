@@ -1,6 +1,7 @@
 import json
 import os
 import socket
+import select 
 from typing import Callable
 from protocol.framing import StreamFramer
 from protocol.message import Message
@@ -46,6 +47,7 @@ class GameClient:
         self.auto_reconnect: bool = False
         self.log_callback: Callable[[str, str], None] | None = None
         self.use_tls: bool = use_tls  # Indique si la connexion doit utiliser TLS/SSL
+        self.inbox: list[dict] = []
 
     def _log(self, direction: str, text: str) -> None:
         if self.log_callback:
@@ -236,13 +238,55 @@ class GameClient:
         return resp
 
     def _read_message(self) -> Message:
-        """Lit le réseau jusqu'à extraire un message complet délimité par \\n."""
         while True:
             raw = self.framer.get_next_message()
-            if raw is not None:
-                return Message.deserialize(raw)
+            if raw is None:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    raise ConnectionError("Le serveur a fermé la connexion")
+                self.framer.feed(chunk)
+                continue
+            msg = Message.deserialize(raw)
+            if self._store_if_push(msg):
+                continue         
+            return msg           
+
+
+    def _store_if_push(self, msg: Message) -> bool:
+        if msg.type == "CHAT" and msg.request_id == 0:
+            self.inbox.append(msg.payload)
+            return True
+        return False
+
+    def poll(self) -> None:
+        if self.sock is None:
+            return
+        self._process_buffered()
+        while True:
+            readable, _, _ = select.select([self.sock], [], [], 0)
+            if not readable:
+                break
             chunk = self.sock.recv(4096)
             if not chunk:
                 raise ConnectionError("Le serveur a fermé la connexion")
             self.framer.feed(chunk)
+            self._process_buffered()
+
+    def _process_buffered(self) -> None:
+        while True:
+            raw = self.framer.get_next_message()
+            if raw is None:
+                break
+            msg = Message.deserialize(raw)
+            if not self._store_if_push(msg):
+                self._log("ERREUR", f"Réponse inattendue hors requête : {msg.type}")
+
+    def chat(self, text: str, scope: str = "global") -> Message:
+        return self.request("CHAT", {"text": text, "scope": scope})
+
+    def join_room(self, room: str) -> Message:
+        return self.request("JOIN_ROOM", {"room": room})
+
+    def leave_room(self) -> Message:
+        return self.request("LEAVE_ROOM")
             

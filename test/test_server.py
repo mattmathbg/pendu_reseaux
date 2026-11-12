@@ -446,3 +446,151 @@ async def test_oversized_message_returns_error_and_closes_connection():
             w.close()
         server.close()
         await server.wait_closed()
+
+class FakeWriter:
+    """Faux writer : enregistre ce qu'on lui envoie, sans réseau."""
+    def __init__(self):
+        self.data = b""
+
+    def write(self, data):
+        self.data += data
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        pass
+
+    async def wait_closed(self):
+        pass
+
+    def messages(self):
+        return [Message.deserialize(line) for line in self.data.split(b"\n") if line]
+
+
+class BrokenWriter(FakeWriter):
+    """Faux writer dont la connexion est morte : write lève une erreur."""
+    def write(self, data):
+        raise ConnectionResetError("connexion morte")
+    
+
+def _player(srv, name):
+    session = srv.sessions.create_session(name)
+    writer = FakeWriter()
+    session.owner = writer
+    return session, writer
+
+
+async def _join(srv, session, room):
+    response, _ = await srv._dispatch_message(
+        Message(type="JOIN_ROOM", request_id=1, session_id=session.session_id,
+                payload={"room": room}), session)
+    assert response.type == "ROOM"
+
+
+async def test_global_chat_reaches_everyone_but_sender():
+    srv = Server(port=0)
+    alice, alice_w = _player(srv, "Alice")
+    _, bob_w = _player(srv, "Bob")
+    _, carol_w = _player(srv, "Carol")
+
+    response, _ = await srv._dispatch_message(
+        Message(type="CHAT", request_id=1, session_id=alice.session_id,
+                payload={"text": "salut", "scope": "global"}), alice)
+
+    for w in (bob_w, carol_w):
+        pushed = w.messages()
+        assert len(pushed) == 1
+        assert pushed[0].request_id == 0
+        assert pushed[0].payload["player"] == "Alice"
+        assert pushed[0].payload["text"] == "salut"
+    assert alice_w.data == b""          # l'expéditeur ne reçoit pas son propre push
+    assert response.type == "CHAT"
+    assert response.request_id == 1     # sa réponse porte son numéro
+
+
+async def test_room_chat_only_reaches_same_room():
+    srv = Server(port=0)
+    alice, _ = _player(srv, "Alice")
+    bob, bob_w = _player(srv, "Bob")
+    carol, carol_w = _player(srv, "Carol")
+    await _join(srv, alice, "salon1")
+    await _join(srv, bob, "salon1")
+    await _join(srv, carol, "salon2")
+
+    response, _ = await srv._dispatch_message(
+        Message(type="CHAT", request_id=2, session_id=alice.session_id,
+                payload={"text": "salut", "scope": "room"}), alice)
+
+    assert len(bob_w.messages()) == 1   # même salon
+    assert carol_w.data == b""          # autre salon : exclu par le filtre
+    assert response.payload["room_id"] == "salon1"
+
+async def test_offline_player_receives_nothing_and_others_still_do():
+    srv = Server(port=0)
+    alice, _ = _player(srv, "Alice")
+    _, bob_w = _player(srv, "Bob")
+    offline, offline_w = _player(srv, "Offline")
+    offline.handle_disconnect()
+
+    await srv._dispatch_message(
+        Message(type="CHAT", request_id=1, session_id=alice.session_id,
+                payload={"text": "salut", "scope": "global"}), alice)
+
+    assert offline_w.data == b""
+    assert len(bob_w.messages()) == 1
+
+
+async def test_dead_connection_does_not_block_others():
+    srv = Server(port=0)
+    alice, _ = _player(srv, "Alice")
+    dead = srv.sessions.create_session("Dead")
+    dead.owner = BrokenWriter()
+    dead.is_connected = True
+    _, carol_w = _player(srv, "Carol")
+
+    response, _ = await srv._dispatch_message(
+        Message(type="CHAT", request_id=1, session_id=alice.session_id,
+                payload={"text": "salut", "scope": "global"}), alice)
+
+    assert response.type == "CHAT"
+    assert len(carol_w.messages()) == 1
+
+
+async def test_room_chat_without_room_is_refused_and_sends_nothing():
+    srv = Server(port=0)
+    alice, _ = _player(srv, "Alice")
+    _, bob_w = _player(srv, "Bob")
+
+    response, _ = await srv._dispatch_message(
+        Message(type="CHAT", request_id=1, session_id=alice.session_id,
+                payload={"text": "salut", "scope": "room"}), alice)
+
+    assert response.payload["code"] == "INVALID_STATE"
+    assert bob_w.data == b""
+
+
+async def test_invalid_text_is_refused_and_sends_nothing():
+    srv = Server(port=0)
+    alice, _ = _player(srv, "Alice")
+    _, bob_w = _player(srv, "Bob")
+
+    for bad in ["", "   ", "x" * 201, 42]:
+        response, _ = await srv._dispatch_message(
+            Message(type="CHAT", request_id=1, session_id=alice.session_id,
+                    payload={"text": bad, "scope": "global"}), alice)
+        assert response.payload["code"] == "INVALID_MESSAGE"
+
+    assert bob_w.data == b""
+
+
+async def test_sender_gets_own_request_id_not_zero():
+    srv = Server(port=0)
+    alice, _ = _player(srv, "Alice")
+    _player(srv, "Bob")
+
+    response, _ = await srv._dispatch_message(
+        Message(type="CHAT", request_id=7, session_id=alice.session_id,
+                payload={"text": "salut", "scope": "global"}), alice)
+
+    assert response.request_id == 7

@@ -90,8 +90,8 @@ class HangmanApp:
 
         self._current_errors: int = 0
         self._current_status: str | None = None
-        self.current_room_id: str = "general"
-        self.current_room_name: str = "Salon Général"
+        self.current_room_id: str | None = None
+        self.current_room_name: str | None = None
 
         self.root.title("🎯 Pendu Réseau M1 — CustomTkinter Game Client")
         self.root.geometry("1080x830")
@@ -118,6 +118,8 @@ class HangmanApp:
         else:
             self._set_status("Déconnecté", "#FF5252")
 
+        self.root.after(200, self._refresh)
+
     def _init_vars(self) -> None:
         """Initialise les variables d'état et d'affichage."""
         self._is_busy: bool = False
@@ -133,7 +135,7 @@ class HangmanApp:
         self.errors_var = tk.StringVar(value="💀 0 / 6")
         self.feedback_var = tk.StringVar(value="Bienvenue ! Connectez-vous et lancez une manche.")
 
-        self.room_badge_var = tk.StringVar(value="🏠 Salon : Salon Général")
+        self.room_badge_var = tk.StringVar(value="🏠 Salon : aucun")
         self.chat_scope_var = tk.StringVar(value="Salon")
 
         # Données locales pour les salons et le chat
@@ -142,14 +144,7 @@ class HangmanApp:
             {"room_id": "defi_m1", "name": "Salon Défi Réseaux M1", "players": ["Alice", "Bob"], "players_count": 2, "status": "EN_COURS"},
             {"room_id": "speedrun", "name": "Salon Speedrun ⚡", "players": [], "players_count": 0, "status": "LIBRE"},
         ]
-        self.chat_history: list[dict[str, str]] = [
-            {
-                "sender": "Système",
-                "text": "Bienvenue sur le chat multi-joueurs du Pendu ! Prêt pour défier vos collègues ?",
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "scope": "Global",
-            }
-        ]
+        self.chat_history: list[dict[str, Any]] = []
 
     def _build_ui(self) -> None:
         """Construit l'interface graphique moderne CustomTkinter."""
@@ -522,13 +517,23 @@ class HangmanApp:
 
     def _on_chat_scope_change(self, value: str) -> None:
         self.chat_scope_var.set(value)
+        self._refresh_chat_display()
+
+    def _visible_messages(self) -> list[dict[str, Any]]:
+        """Renvoie les messages à afficher selon l'onglet choisi."""
+        if self.chat_scope_seg.get() == "Chat Global":
+            return [m for m in self.chat_history if m["scope"] == "global"]
+        return [
+            m for m in self.chat_history
+            if m["scope"] == "room" and m["room_id"] == self.current_room_id
+        ]
 
     def _refresh_chat_display(self) -> None:
         """Réaffiche l'ensemble des bulles de messages du chat."""
         for widget in self.chat_messages_frame.winfo_children():
             widget.destroy()
 
-        for msg in self.chat_history:
+        for msg in self._visible_messages():
             bubble = ctk.CTkFrame(self.chat_messages_frame, corner_radius=10, fg_color=THEME["bg_elevated"])
             bubble.pack(fill="x", padx=6, pady=3)
 
@@ -550,7 +555,7 @@ class HangmanApp:
 
             ctk.CTkLabel(
                 head,
-                text=f"[{msg.get('time', '')}] • {msg.get('scope', 'Salon')}",
+                text=f"[{msg.get('time', '')}] • {("Salon" if msg["scope"] == "room" else "Global")}",
                 font=ctk.CTkFont(size=9),
                 text_color=THEME["text_muted"],
             ).pack(side="right")
@@ -564,35 +569,32 @@ class HangmanApp:
                 justify="left",
             ).pack(anchor="w", padx=8, pady=(2, 6))
 
+    def _add_chat_line(self, payload: dict) -> None:
+        """Ajoute un message (push reçu ou réponse à mon envoi) à l'historique."""
+        self.chat_history.append({
+            "sender": payload.get("player", "?"),
+            "text": payload.get("text", ""),
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "scope": payload.get("scope", "global"),     # "global" ou "room"
+            "room_id": payload.get("room_id"),
+        })
+        self._refresh_chat_display()
+    
     def _send_chat_message(self) -> None:
-        """Envoie un message sur le chat et interroge le serveur s'il est connecté."""
         text = self.chat_entry.get().strip()
         if not text:
             return
-
         scope = "room" if self.chat_scope_seg.get() == "Salon Courant" else "global"
-        ts = datetime.now().strftime("%H:%M:%S")
-
-        # Ajout immédiat dans l'interface
-        self.chat_history.append({
-            "sender": self.pseudo_var.get() or "Joueur",
-            "text": text,
-            "time": ts,
-            "scope": "Salon" if scope == "room" else "Global",
-        })
+        try:
+            resp = self.client.chat(text, scope)
+        except (ConnectionError, OSError) as e:
+            messagebox.showerror("Erreur réseau", str(e))
+            return
+        if resp.type == "ERROR":
+            messagebox.showwarning("Chat", resp.payload.get("message", "Message refusé."))
+            return
         self.chat_entry.delete(0, "end")
-        self._refresh_chat_display()
-
-        # Si connecté, transmission au serveur via trame TCP CHAT
-        if self.client.is_connected() and self.client.session_id:
-            def task():
-                return self.client.request("CHAT", {"text": text, "scope": scope})
-
-            def on_success(resp: Message):
-                if resp.type == "CHAT_MESSAGE":
-                    self.log_network_event("INFO", f"Chat diffusé : {text}")
-
-            self._run_async(task, on_success=on_success)
+        self._add_chat_line(resp.payload)   # l'expéditeur ne reçoit pas son propre push
 
     # --- ONGLET 3 : SALONS DE JEU (EXTENSION B) ---
 
@@ -770,24 +772,40 @@ class HangmanApp:
             self._run_async(lambda: self.client.request("CREATE_ROOM", {"name": name}))
 
     def _join_room_action(self, room: dict[str, Any]) -> None:
-        """Rejoint un salon via JOIN_ROOM."""
-        self.current_room_id = room["room_id"]
+        """Rejoint un salon. L'affichage ne change qu'après la confirmation ROOM du serveur."""
+        if not self.client.is_connected() or not self.client.session_id:
+            messagebox.showwarning("Connexion requise", "Connectez-vous d'abord.")
+            return
+        try:
+            resp = self.client.join_room(room["room_id"])
+        except (ConnectionError, OSError) as e:
+            messagebox.showerror("Erreur réseau", str(e))
+            return
+        if resp.type == "ERROR":
+            messagebox.showwarning("Salon", resp.payload.get("message", "Impossible de rejoindre le salon."))
+            return
+        self.current_room_id = resp.payload.get("room_id")
         self.current_room_name = room["name"]
-        self.room_badge_var.set(f"🏠 Salon : {room['name']}")
+        self.room_badge_var.set(f"🏠 Salon : {self.current_room_name}")
         self._render_rooms_list()
 
-        if self.client.is_connected() and self.client.session_id:
-            self._run_async(lambda: self.client.request("JOIN_ROOM", {"room_id": room["room_id"]}))
 
     def _leave_room_action(self) -> None:
-        """Quitte le salon pour le salon général via LEAVE_ROOM."""
-        self.current_room_id = "general"
-        self.current_room_name = "Salon Général"
-        self.room_badge_var.set("🏠 Salon : Salon Général")
+        """Quitte le salon courant, uniquement si le serveur confirme."""
+        if not self.client.is_connected() or not self.client.session_id:
+            return
+        try:
+            resp = self.client.leave_room()
+        except (ConnectionError, OSError) as e:
+            messagebox.showerror("Erreur réseau", str(e))
+            return
+        if resp.type == "ERROR":
+            messagebox.showwarning("Salon", resp.payload.get("message", "Impossible de quitter le salon."))
+            return
+        self.current_room_id = None
+        self.current_room_name = None
+        self.room_badge_var.set("🏠 Salon : aucun")
         self._render_rooms_list()
-
-        if self.client.is_connected() and self.client.session_id:
-            self._run_async(lambda: self.client.request("LEAVE_ROOM"))
 
     # --- ONGLET 4 : INSPECTEUR RÉSEAU ---
 
@@ -1017,6 +1035,18 @@ class HangmanApp:
         finally:
             if self.root:
                 self.root.after(30, self._process_gui_queue)
+
+    def _refresh(self) -> None:
+            try:
+                self.client.poll()
+            except (ConnectionError, OSError):
+                self.client.close()
+                self._set_status("Déconnecté", "#FF5252")
+            if self.client.inbox:
+                for m in self.client.inbox:
+                    self._add_chat_line(m)
+                self.client.inbox.clear()
+            self.root.after(200, self._refresh)
 
     def log_network_event(self, direction: str, text: str) -> None:
         """Point d'entrée thread-safe pour les logs de GameClient."""

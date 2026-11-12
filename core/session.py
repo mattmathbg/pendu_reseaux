@@ -10,6 +10,7 @@ class GameSession:
      session_id: str
      auth_token: str
      player_name: str
+     room_id: str | None
      game: Pendu | None
      is_connected: bool
      disconnect_timestamp: float | None
@@ -23,6 +24,7 @@ class GameSession:
           self.disconnect_timestamp = None
           self.owner = None
           self.last_response = None
+          self.room_id = None
      
      def handle_disconnect(self) -> None:
           """

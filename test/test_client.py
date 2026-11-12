@@ -301,3 +301,58 @@ def test_quit_deletes_saved_session_file(tmp_path, monkeypatch):
     client.quit_game()
 
     assert not (tmp_path / "session.json").exists()
+
+def test_pushed_chat_during_request_is_stored_not_returned():
+    client = make_client(
+        server_reply(0, "CHAT", player="Bob", scope="global", text="yo"),
+        server_reply(1, word="_e__e"),
+    )
+    response = client.request("LETTER", {"letter": "e"})
+
+    assert response.type == "STATE"
+    assert client.inbox == [{"player": "Bob", "scope": "global", "text": "yo"}]
+
+
+def test_poll_reads_pushed_chat_without_any_request():
+    a, b = socket.socketpair()
+    try:
+        client = GameClient()
+        client.sock = a
+        b.sendall(server_reply(0, "CHAT", player="Bob", scope="global", text="yo"))
+        client.poll()
+        assert client.inbox == [{"player": "Bob", "scope": "global", "text": "yo"}]
+    finally:
+        a.close()
+        b.close()
+
+
+def test_poll_without_data_returns_immediately():
+    a, b = socket.socketpair()
+    try:
+        client = GameClient()
+        client.sock = a
+        client.poll()          # si cette ligne bloque, le test ne termine jamais
+        assert client.inbox == []
+    finally:
+        a.close()
+        b.close()
+
+
+def test_chat_sends_chat_message():
+    client = make_client(server_reply(1, "CHAT", player="Alice", scope="global", text="salut"))
+    client.chat("salut")
+
+    assert sent_message(client).type == "CHAT"
+    assert sent_message(client).payload == {"text": "salut", "scope": "global"}
+
+def test_poll_processes_message_already_in_framer():
+    a, b = socket.socketpair()
+    try:
+        client = GameClient()
+        client.sock = a
+        client.framer.feed(server_reply(0, "CHAT", player="Bob", scope="global", text="yo"))
+        client.poll()    # aucune donnée sur la socket : le message est déjà dans le framer
+        assert client.inbox == [{"player": "Bob", "scope": "global", "text": "yo"}]
+    finally:
+        a.close()
+        b.close()
