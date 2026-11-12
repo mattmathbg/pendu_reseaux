@@ -8,6 +8,7 @@ from string import ascii_uppercase
 import tkinter as tk
 from tkinter import messagebox
 from typing import Any, Callable
+from client.controller import GameController
 
 import customtkinter as ctk
 
@@ -83,6 +84,7 @@ class HangmanApp:
             self._owns_root = False
 
         self.client = client or GameClient("127.0.0.1", 8888)
+        self.controller = GameController(self.client)
         self._timer_started_at: float | None = None
         self._timer_after_id: str | None = None
         self._gui_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
@@ -586,7 +588,7 @@ class HangmanApp:
             return
         scope = "room" if self.chat_scope_seg.get() == "Salon Courant" else "global"
         try:
-            resp = self.client.chat(text, scope)
+            resp = self.controller.chat(text, scope)
         except (ConnectionError, OSError) as e:
             messagebox.showerror("Erreur réseau", str(e))
             return
@@ -777,7 +779,7 @@ class HangmanApp:
             messagebox.showwarning("Connexion requise", "Connectez-vous d'abord.")
             return
         try:
-            resp = self.client.join_room(room["room_id"])
+            resp = self.controller.join_room(room["room_id"])
         except (ConnectionError, OSError) as e:
             messagebox.showerror("Erreur réseau", str(e))
             return
@@ -795,7 +797,7 @@ class HangmanApp:
         if not self.client.is_connected() or not self.client.session_id:
             return
         try:
-            resp = self.client.leave_room()
+            resp = self.controller.leave_room()
         except (ConnectionError, OSError) as e:
             messagebox.showerror("Erreur réseau", str(e))
             return
@@ -1037,16 +1039,15 @@ class HangmanApp:
                 self.root.after(30, self._process_gui_queue)
 
     def _refresh(self) -> None:
-            try:
-                self.client.poll()
-            except (ConnectionError, OSError):
-                self.client.close()
-                self._set_status("Déconnecté", "#FF5252")
-            if self.client.inbox:
-                for m in self.client.inbox:
-                    self._add_chat_line(m)
-                self.client.inbox.clear()
-            self.root.after(200, self._refresh)
+        try:
+            messages = self.controller.poll()
+        except (ConnectionError, OSError):
+            self.client.close()
+            self._set_status("Déconnecté", "#FF5252")
+            messages = []
+        for m in messages:
+            self._add_chat_line(m)
+        self.root.after(200, self._refresh)
 
     def log_network_event(self, direction: str, text: str) -> None:
         """Point d'entrée thread-safe pour les logs de GameClient."""
@@ -1127,37 +1128,29 @@ class HangmanApp:
         self._set_status("Connexion en cours...", "#F59E0B")
         self.connect_btn.configure(state="disabled")
 
-        def task():
-            self.client.host = host
-            self.client.port = port
-            self.client.use_tls = use_tls
-            self.client.connect()
-            welcome = self.client.hello(pseudo)
-            return welcome
-
-        def on_success(welcome_resp: Message):
-            self.connect_btn.configure(state="normal")
-            if welcome_resp.type == "WELCOME":
-                self._set_status(f"Connecté à {self.client.host}:{self.client.port}", "#00E676")
-                self.connect_btn.configure(text="🔴 Déconnecter", fg_color=("#DC2626", "#B91C1C"))
-                self.session_info_label.configure(
-                    text=f"Session : {self.client.session_id[:8]}... | Joueur : {self.client.player_name}"
-                )
-                self.client.save_session("session.json")
-                self._check_saved_session()
-                self._set_feedback(f"Bienvenue {self.client.player_name} ! Lancement de la partie...", THEME["accent_success"])
-                self.start_new_game()
-            else:
-                self._set_status("Erreur session", "#FF5252")
-                messagebox.showerror("Erreur d'accueil", welcome_resp.payload.get("message", "Échec HELLO"))
-
-        def on_error(exc: Exception):
+        try:
+            welcome = self.controller.connect(host, port, pseudo)
+        except (ConnectionError, OSError) as exc:
             self.connect_btn.configure(state="normal", text="🔌 Connexion", fg_color=THEME["accent_primary"])
             self._set_status("Échec connexion", "#FF5252")
             self._set_feedback(f"Erreur de connexion : {exc}", THEME["accent_danger"])
             messagebox.showerror("Connexion impossible", f"Impossible d'ouvrir la socket vers {host}:{port} :\n{exc}")
+            return
 
-        self._run_async(task, on_success=on_success, on_error=on_error)
+        self.connect_btn.configure(state="normal")
+        if welcome.type == "WELCOME":
+            self._set_status(f"Connecté à {self.client.host}:{self.client.port}", "#00E676")
+            self.connect_btn.configure(text="🔴 Déconnecter", fg_color=("#DC2626", "#B91C1C"))
+            self.session_info_label.configure(
+                text=f"Session : {self.client.session_id[:8]}... | Joueur : {self.client.player_name}"
+            )
+            self.client.save_session("session.json")
+            self._check_saved_session()
+            self._set_feedback(f"Bienvenue {self.client.player_name} ! Lancement de la partie...", THEME["accent_success"])
+            self.start_new_game()
+        else:
+            self._set_status("Erreur session", "#FF5252")
+            messagebox.showerror("Erreur d'accueil", welcome.payload.get("message", "Échec HELLO"))
 
     def start_session(self, player_name: str) -> None:
         """Méthode de compatibilité pour initialiser une session."""
@@ -1328,54 +1321,50 @@ class HangmanApp:
             )
 
         self._set_feedback("Démarrage d'une nouvelle manche...")
-
-        def on_success(resp: Message):
-            self.update_from_state(resp)
-            self._set_feedback("Nouvelle manche commencée ! Choisissez une lettre.", THEME["accent_primary"])
-
-        def on_error(exc: Exception):
+        try:
+            resp = self.controller.new_game()
+        except (ConnectionError, OSError) as exc:
             self._set_status("Déconnecté", "#FF5252")
             messagebox.showerror("Erreur", f"Erreur réseau lors de NEW_GAME : {exc}")
-
-        self._run_async(self.client.new_game, on_success=on_success, on_error=on_error)
+            return
+        self.update_from_state(resp)
+        self._set_feedback("Nouvelle manche commencée ! Choisissez une lettre.", THEME["accent_primary"])
 
     def play(self, letter: str) -> None:
-        """Propose une lettre au serveur."""
         letter_upper = letter.upper()
-        if letter_upper in self.buttons:
+        try:
+            resp = self.controller.guess(letter_upper)
+        except (ConnectionError, OSError) as exc:
+            self._set_status("Déconnecté", "#FF5252")
+            messagebox.showerror("Erreur Réseau", f"Échec de l'envoi de la lettre : {exc}")
+            return
+
+        if resp.type != "ERROR" and letter_upper in self.buttons:
             self.buttons[letter_upper].configure(
                 state="disabled",
                 fg_color=THEME["bg_card"],
                 text_color=THEME["text_muted"],
             )
-
-        def on_success(resp: Message):
-            self.update_from_state(resp)
-
-        def on_error(exc: Exception):
-            self._set_status("Déconnecté", "#FF5252")
-            messagebox.showerror("Erreur Réseau", f"Échec de l'envoi de la lettre : {exc}")
-
-        self._run_async(self.client.guess, args=(letter_upper,), on_success=on_success, on_error=on_error)
+        self.update_from_state(resp)
 
     def quit_game(self) -> None:
-        """Envoie QUIT au serveur."""
-        if messagebox.askyesno("Abandonner", "Voulez-vous vraiment abandonner la partie ?"):
-            def task():
-                return self.client.quit_game()
+        if not messagebox.askyesno("Abandonner", "Voulez-vous vraiment abandonner la partie ?"):
+            return
+        try:
+            self.controller.quit_game()
+        except (ConnectionError, OSError) as exc:
+            messagebox.showwarning("Attention", f"Erreur lors de QUIT : {exc}")
+            return
 
-            def on_success(_):
-                self._stop_timer()
-                self._set_status("Session clôturée", "#94A3B8")
-                self.info_var.set("Session clôturée.")
-                self.feedback_var.set("Partie abandonnée.")
-                for btn in self.buttons.values():
-                    btn.configure(state="disabled")
-
-            def on_error(exc: Exception):
-                messagebox.showwarning("Attention", f"Erreur lors de QUIT : {exc}")
-
-            self._run_async(task, on_success=on_success, on_error=on_error)
+        self._stop_timer()
+        self._set_status("Session clôturée", "#94A3B8")
+        self.info_var.set("Session clôturée.")
+        self.feedback_var.set("Partie abandonnée.")
+        self.current_room_id = None
+        self.current_room_name = None
+        self.room_badge_var.set("🏠 Salon : aucun")
+        for btn in self.buttons.values():
+            btn.configure(state="disabled")
 
     def simulate_disconnect(self) -> None:
         """Ferme la socket locale pour démontrer la tolérance aux pannes (RESUME)."""
