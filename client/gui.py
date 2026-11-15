@@ -51,26 +51,6 @@ THEME = {
 }
 
 
-class LetterButton(ctk.CTkButton):
-    """
-    Bouton CustomTkinter avec rétro-compatibilité totale pour l'accès aux états :
-    btn['state'], btn.cget('state') et btn.configure(state=...).
-    """
-    def __getitem__(self, item: str) -> Any:
-        if item == "state":
-            return self._state
-        if item in ("bg", "fg_color"):
-            return self._fg_color
-        try:
-            return super().__getitem__(item)
-        except Exception:
-            return getattr(self, f"_{item}", None)
-
-    def cget(self, attribute_name: str) -> Any:
-        if attribute_name == "state":
-            return self._state
-        return super().cget(attribute_name)
-
 
 class HangmanApp:
     def __init__(self, root: ctk.CTk | tk.Tk | None = None, client: GameClient | None = None) -> None:
@@ -78,22 +58,22 @@ class HangmanApp:
             ctk.set_appearance_mode("dark")
             ctk.set_default_color_theme("blue")
             self.root = ctk.CTk()
-            self._owns_root = True
+           
         else:
             self.root = root
-            self._owns_root = False
+        
 
         self.client = client or GameClient("127.0.0.1", 8888)
         self.controller = GameController(self.client)
         self._timer_started_at: float | None = None
         self._timer_after_id: str | None = None
         self._gui_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
-        self.inspector_visible: bool = True
+        
 
         self._current_errors: int = 0
         self._current_status: str | None = None
         self.current_room_id: str | None = None
-        self.current_room_name: str | None = None
+        
 
         self.root.title("🎯 Pendu Réseau M1 — CustomTkinter Game Client")
         self.root.geometry("1080x830")
@@ -138,14 +118,9 @@ class HangmanApp:
         self.feedback_var = tk.StringVar(value="Bienvenue ! Connectez-vous et lancez une manche.")
 
         self.room_badge_var = tk.StringVar(value="🏠 Salon : aucun")
-        self.chat_scope_var = tk.StringVar(value="Salon")
+       
 
-        # Données locales pour les salons et le chat
-        self.rooms_data: list[dict[str, Any]] = [
-            {"room_id": "general", "name": "Salon Général", "players": ["Joueur"], "players_count": 1, "status": "LIBRE"},
-            {"room_id": "defi_m1", "name": "Salon Défi Réseaux M1", "players": ["Alice", "Bob"], "players_count": 2, "status": "EN_COURS"},
-            {"room_id": "speedrun", "name": "Salon Speedrun ⚡", "players": [], "players_count": 0, "status": "LIBRE"},
-        ]
+      
         self.chat_history: list[dict[str, Any]] = []
 
     def _build_ui(self) -> None:
@@ -156,19 +131,17 @@ class HangmanApp:
         # 1. BANDEAU SUPÉRIEUR : Branding, Statut, Dark/Light Switch & Connexion
         self._build_top_header(self.main_container)
 
-        # 2. NAVIGATION PAR ONGLETS (Jeu, Chat, Salons, Inspecteur)
+        # 2. NAVIGATION PAR ONGLETS (Jeu, Chat, Inspecteur)
         self.tabview = ctk.CTkTabview(self.main_container, corner_radius=14)
         self.tabview.pack(fill="both", expand=True, pady=(6, 0))
 
         self.tab_game = self.tabview.add("🎮 Plateau de Jeu")
         self.tab_chat = self.tabview.add("💬 Chat en Direct")
-        self.tab_rooms = self.tabview.add("🏠 Salons de Jeu")
         self.tab_inspector = self.tabview.add("🔍 Inspecteur Réseau")
 
         # Construction des contenus de chaque onglet
         self._build_game_tab(self.tab_game)
         self._build_chat_tab(self.tab_chat)
-        self._build_rooms_tab(self.tab_rooms)
         self._build_inspector_tab(self.tab_inspector)
 
     def _build_top_header(self, parent: ctk.CTkFrame) -> None:
@@ -389,7 +362,7 @@ class HangmanApp:
             text_color=THEME["text_secondary"],
         ).pack(pady=(6, 4))
 
-        self.buttons: dict[str, LetterButton] = {}
+        self.buttons: dict[str, ctk.CTkButton] = {}
         rows = [
             list(ascii_uppercase[:9]),     # A - I
             list(ascii_uppercase[9:18]),   # J - R
@@ -400,7 +373,7 @@ class HangmanApp:
             r_frame = ctk.CTkFrame(keyboard_card, fg_color="transparent")
             r_frame.pack(pady=2)
             for letter in row_letters:
-                btn = LetterButton(
+                btn = ctk.CTkButton(
                     r_frame,
                     text=letter,
                     width=42,
@@ -517,8 +490,40 @@ class HangmanApp:
         )
         self.chat_send_btn.pack(side="right")
 
+        # Barre de salon : rejoindre / quitter
+        room_bar = ctk.CTkFrame(parent, fg_color="transparent")
+        room_bar.pack(fill="x", padx=14, pady=(0, 10))
+
+        self.room_entry = ctk.CTkEntry(
+            room_bar,
+            placeholder_text="Nom du salon (1 à 20 caractères)",
+            height=32,
+            width=260,
+        )
+        self.room_entry.pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            room_bar,
+            text="➡️ Rejoindre",
+            width=110,
+            height=32,
+            fg_color=THEME["accent_primary"],
+            hover_color="#0284C7",
+            command=self._join_room_from_entry,
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            room_bar,
+            text="🚪 Quitter le salon",
+            width=150,
+            height=32,
+            fg_color=THEME["accent_danger"],
+            hover_color="#991B1B",
+            command=self._leave_room_action,
+        ).pack(side="left")
+
     def _on_chat_scope_change(self, value: str) -> None:
-        self.chat_scope_var.set(value)
+    
         self._refresh_chat_display()
 
     def _visible_messages(self) -> list[dict[str, Any]]:
@@ -598,216 +603,37 @@ class HangmanApp:
         self.chat_entry.delete(0, "end")
         self._add_chat_line(resp.payload)   # l'expéditeur ne reçoit pas son propre push
 
-    # --- ONGLET 3 : SALONS DE JEU (EXTENSION B) ---
 
-    def _build_rooms_tab(self, parent: ctk.CTkFrame) -> None:
-        """Construit le gestionnaire de salles de jeu / salons multi-joueurs (Extension B)."""
-        top_bar = ctk.CTkFrame(parent, fg_color="transparent")
-        top_bar.pack(fill="x", padx=14, pady=(8, 4))
-
-        ctk.CTkLabel(
-            top_bar,
-            text="🏠 Gestion des Salles de Jeu (LIST, CREATE, JOIN, LEAVE)",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-
-        refresh_btn = ctk.CTkButton(
-            top_bar,
-            text="🔄 Actualiser les salons",
-            width=130,
-            height=28,
-            font=ctk.CTkFont(size=11),
-            fg_color=THEME["bg_elevated"],
-            hover_color=THEME["bg_hover"],
-            text_color=THEME["text_primary"],
-            command=self._refresh_rooms_list,
-        )
-        refresh_btn.pack(side="right")
-
-        # Formulaire de création de salon
-        create_frame = ctk.CTkFrame(parent, corner_radius=12, fg_color=THEME["bg_card"], border_width=1, border_color=THEME["border"])
-        create_frame.pack(fill="x", padx=14, pady=6)
-
-        ctk.CTkLabel(
-            create_frame,
-            text="Créer un nouveau salon :",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left", padx=(12, 8), pady=8)
-
-        self.new_room_entry = ctk.CTkEntry(
-            create_frame,
-            placeholder_text="Nom du salon (ex: Salon VIP Réseaux)...",
-            height=30,
-            width=280,
-            font=ctk.CTkFont(size=12),
-        )
-        self.new_room_entry.pack(side="left", padx=(0, 10))
-
-        create_btn = ctk.CTkButton(
-            create_frame,
-            text="➕ Créer et Rejoindre",
-            height=30,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=THEME["accent_primary"],
-            hover_color="#0284C7",
-            command=self._create_room_action,
-        )
-        create_btn.pack(side="left")
-
-        # Liste scrollable des salons
-        self.rooms_scroll_frame = ctk.CTkScrollableFrame(
-            parent,
-            corner_radius=12,
-            fg_color=THEME["bg_card"],
-            border_width=1,
-            border_color=THEME["border"],
-            height=360,
-        )
-        self.rooms_scroll_frame.pack(fill="both", expand=True, padx=14, pady=(4, 10))
-
-        self._render_rooms_list()
-
-    def _render_rooms_list(self) -> None:
-        """Affiche les cartes de salons disponibles avec actions Rejoindre/Quitter."""
-        for widget in self.rooms_scroll_frame.winfo_children():
-            widget.destroy()
-
-        for room in self.rooms_data:
-            r_id = room["room_id"]
-            card = ctk.CTkFrame(self.rooms_scroll_frame, corner_radius=10, fg_color=THEME["bg_elevated"])
-            card.pack(fill="x", padx=6, pady=4)
-
-            left = ctk.CTkFrame(card, fg_color="transparent")
-            left.pack(side="left", padx=10, pady=8)
-
-            ctk.CTkLabel(
-                left,
-                text=room["name"],
-                font=ctk.CTkFont(size=13, weight="bold"),
-                text_color=THEME["text_primary"],
-            ).pack(anchor="w")
-
-            status_str = f"Statut : {room.get('status', 'LIBRE')} • Joueurs : {len(room.get('players', []))}"
-            ctk.CTkLabel(
-                left,
-                text=status_str,
-                font=ctk.CTkFont(size=11),
-                text_color=THEME["text_secondary"],
-            ).pack(anchor="w")
-
-            right = ctk.CTkFrame(card, fg_color="transparent")
-            right.pack(side="right", padx=10, pady=8)
-
-            if r_id == self.current_room_id:
-                ctk.CTkLabel(
-                    right,
-                    text="✔ Vous êtes ici",
-                    font=ctk.CTkFont(size=11, weight="bold"),
-                    text_color=THEME["accent_success"],
-                ).pack(side="left", padx=(0, 6))
-
-                if r_id != "general":
-                    leave_btn = ctk.CTkButton(
-                        right,
-                        text="🚪 Quitter",
-                        width=80,
-                        height=28,
-                        fg_color=THEME["accent_danger"],
-                        hover_color="#991B1B",
-                        command=self._leave_room_action,
-                    )
-                    leave_btn.pack(side="left")
-            else:
-                join_btn = ctk.CTkButton(
-                    right,
-                    text="➡️ Rejoindre",
-                    width=90,
-                    height=28,
-                    fg_color=THEME["accent_primary"],
-                    hover_color="#0284C7",
-                    command=lambda r=room: self._join_room_action(r),
-                )
-                join_btn.pack(side="left")
-
-    def _refresh_rooms_list(self) -> None:
-        """Demande la liste des salons au serveur via LIST_ROOMS."""
-        if self.client.is_connected() and self.client.session_id:
-            def task():
-                return self.client.request("LIST_ROOMS")
-
-            def on_success(resp: Message):
-                if resp.type == "ROOMS_LIST":
-                    rooms = resp.payload.get("rooms", [])
-                    if rooms:
-                        self.rooms_data = rooms
-                    self._render_rooms_list()
-
-            self._run_async(task, on_success=on_success)
-        else:
-            self._render_rooms_list()
-
-    def _create_room_action(self) -> None:
-        """Crée un salon via CREATE_ROOM."""
-        name = self.new_room_entry.get().strip()
-        if not name:
-            messagebox.showwarning("Nom requis", "Veuillez entrer un nom pour le salon.")
-            return
-
-        new_id = f"room_{len(self.rooms_data) + 1}"
-        new_room = {
-            "room_id": new_id,
-            "name": name,
-            "players": [self.pseudo_var.get()],
-            "players_count": 1,
-            "status": "LIBRE",
-        }
-        self.rooms_data.append(new_room)
-        self.current_room_id = new_id
-        self.current_room_name = name
-        self.room_badge_var.set(f"🏠 Salon : {name}")
-        self.new_room_entry.delete(0, "end")
-        self._render_rooms_list()
-
-        if self.client.is_connected() and self.client.session_id:
-            self._run_async(lambda: self.client.request("CREATE_ROOM", {"name": name}))
-
-    def _join_room_action(self, room: dict[str, Any]) -> None:
-        """Rejoint un salon. L'affichage ne change qu'après la confirmation ROOM du serveur."""
-        if not self.client.is_connected() or not self.client.session_id:
-            messagebox.showwarning("Connexion requise", "Connectez-vous d'abord.")
-            return
-        try:
-            resp = self.controller.join_room(room["room_id"])
-        except (ConnectionError, OSError) as e:
-            messagebox.showerror("Erreur réseau", str(e))
-            return
-        if resp.type == "ERROR":
-            messagebox.showwarning("Salon", resp.payload.get("message", "Impossible de rejoindre le salon."))
-            return
-        self.current_room_id = resp.payload.get("room_id")
-        self.current_room_name = room["name"]
-        self.room_badge_var.set(f"🏠 Salon : {self.current_room_name}")
-        self._render_rooms_list()
-
+    def _join_room_from_entry(self) -> None:
+            name = self.room_entry.get().strip()
+            if not name:
+                return
+            try:
+                resp = self.controller.join_room(name)
+            except (ConnectionError, OSError) as exc:
+                messagebox.showerror("Erreur réseau", str(exc))
+                return
+            if resp.type == "ERROR":
+                messagebox.showwarning("Salon", resp.payload.get("message", "Impossible de rejoindre le salon."))
+                return
+            self.current_room_id = resp.payload.get("room_id")
+            self.room_badge_var.set(f"🏠 Salon : {self.current_room_id}")
+            self.room_entry.delete(0, "end")
+            self._refresh_chat_display()
 
     def _leave_room_action(self) -> None:
-        """Quitte le salon courant, uniquement si le serveur confirme."""
-        if not self.client.is_connected() or not self.client.session_id:
-            return
         try:
             resp = self.controller.leave_room()
-        except (ConnectionError, OSError) as e:
-            messagebox.showerror("Erreur réseau", str(e))
+        except (ConnectionError, OSError) as exc:
+            messagebox.showerror("Erreur réseau", str(exc))
             return
         if resp.type == "ERROR":
             messagebox.showwarning("Salon", resp.payload.get("message", "Impossible de quitter le salon."))
             return
         self.current_room_id = None
-        self.current_room_name = None
         self.room_badge_var.set("🏠 Salon : aucun")
-        self._render_rooms_list()
+        self._refresh_chat_display()
+        
 
     # --- ONGLET 4 : INSPECTEUR RÉSEAU ---
 
@@ -852,13 +678,6 @@ class HangmanApp:
         self.log_text.tag_config("ERREUR", foreground="#FF5252")
         self.log_text.tag_config("INFO", foreground="#94A3B8")
 
-    def _toggle_inspector(self) -> None:
-        """Bascule la vue vers l'inspecteur réseau (compatibilité test)."""
-        self.inspector_visible = not self.inspector_visible
-        if self.inspector_visible:
-            self.tabview.set("🔍 Inspecteur Réseau")
-        else:
-            self.tabview.set("🎮 Plateau de Jeu")
 
     def _clear_logs(self) -> None:
         """Efface les logs de la console."""
@@ -1123,7 +942,6 @@ class HangmanApp:
             return
 
         pseudo = self.pseudo_var.get().strip() or "Joueur"
-        use_tls = self.tls_var.get()
 
         self._set_status("Connexion en cours...", "#F59E0B")
         self.connect_btn.configure(state="disabled")
@@ -1152,10 +970,7 @@ class HangmanApp:
             self._set_status("Erreur session", "#FF5252")
             messagebox.showerror("Erreur d'accueil", welcome.payload.get("message", "Échec HELLO"))
 
-    def start_session(self, player_name: str) -> None:
-        """Méthode de compatibilité pour initialiser une session."""
-        self.pseudo_var.set(player_name)
-        self.connect_or_disconnect()
+
 
     def resume_existing_session(self) -> None:
         """Tente de reprendre la session stockée via RESUME."""
@@ -1164,43 +979,36 @@ class HangmanApp:
                 messagebox.showinfo("Aucune session", "Aucune session enregistrée à reprendre.")
                 return
 
-        # Synchronisation des paramètres réseau saisis dans l'IHM
-        self.client.host = self.host_var.get().strip() or "127.0.0.1"
+        host = self.host_var.get().strip() or "127.0.0.1"
         try:
-            self.client.port = int(self.port_var.get().strip())
+            port = int(self.port_var.get().strip())
         except ValueError:
             messagebox.showerror("Port invalide", "Veuillez entrer un numéro de port valide (ex: 8888).")
             return
-        self.client.use_tls = self.tls_var.get()
 
         self._set_status("Reprise de session...", "#F59E0B")
-
-        def task():
-            if not self.client.is_connected():
-                self.client.connect()
-            return self.client.resume()
-
-        def on_success(resp: Message):
-            if resp.type == "STATE":
-                self._set_status(f"Connecté à {self.client.host}:{self.client.port}", "#00E676")
-                self.connect_btn.configure(text="🔴 Déconnecter", fg_color=("#DC2626", "#B91C1C"))
-                self.session_info_label.configure(
-                    text=f"Session : {self.client.session_id[:8]}... | Joueur : {self.client.player_name}"
-                )
-                self._set_feedback("Session restaurée avec succès !", THEME["accent_success"])
-                if resp.payload.get("status") == "IDLE":
-                    self.start_new_game()
-                else:
-                    self.update_from_state(resp)
-            else:
-                messagebox.showwarning("Reprise impossible", resp.payload.get("message", "Session expirée"))
-                self._set_status("Session expirée", "#FF5252")
-
-        def on_error(exc: Exception):
+        try:
+            resp = self.controller.resume(host, port)
+        except (ConnectionError, OSError) as exc:
             self._set_status("Déconnecté", "#FF5252")
             messagebox.showwarning("Reprise impossible", f"Erreur de reprise : {exc}")
+            return
 
-        self._run_async(task, on_success=on_success, on_error=on_error)
+        if resp.type != "STATE":
+            messagebox.showwarning("Reprise impossible", resp.payload.get("message", "Session expirée"))
+            self._set_status("Session expirée", "#FF5252")
+            return
+
+        self._set_status(f"Connecté à {self.client.host}:{self.client.port}", "#00E676")
+        self.connect_btn.configure(text="🔴 Déconnecter", fg_color=("#DC2626", "#B91C1C"))
+        self.session_info_label.configure(
+            text=f"Session : {self.client.session_id[:8]}... | Joueur : {self.client.player_name}"
+        )
+        self._set_feedback("Session restaurée avec succès !", THEME["accent_success"])
+        if resp.payload.get("status") == "IDLE":
+            self.start_new_game()
+        else:
+            self.update_from_state(resp)
 
     def discover_local_servers(self) -> None:
         """Sonde le réseau local en UDP Multicast pour trouver les serveurs actifs."""
@@ -1361,7 +1169,6 @@ class HangmanApp:
         self.info_var.set("Session clôturée.")
         self.feedback_var.set("Partie abandonnée.")
         self.current_room_id = None
-        self.current_room_name = None
         self.room_badge_var.set("🏠 Salon : aucun")
         for btn in self.buttons.values():
             btn.configure(state="disabled")

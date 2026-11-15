@@ -19,6 +19,7 @@ import socket
 import struct
 import threading
 import time
+import uuid
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ class DiscoveryServer:
         self.discovery_port = discovery_port
         self.use_tls = use_tls
         self.get_players_count = get_players_count or (lambda: 0)
+        self.server_id = uuid.uuid4().hex
 
         self._running = False
         self._thread: threading.Thread | None = None
@@ -144,6 +146,7 @@ class DiscoveryServer:
 
         offer = {
             "type": "OFFER",
+            "server_id": self.server_id,
             "server_name": self.server_name,
             "tcp_port": self.tcp_port,
             "players_count": self.get_players_count(),
@@ -272,12 +275,13 @@ def discover_servers(
                         server_name = str(resp.get("server_name", "Serveur Pendu"))
                         players = int(resp.get("players_count", 0))
                         use_tls = bool(resp.get("use_tls", False))
+                        # Identifiant du serveur : même serveur = même clé, quelle que soit l'adresse
+                        server_id = str(resp.get("server_id", f"{clean_ip}:{tcp_port}"))
 
-                        key = f"{clean_ip}:{tcp_port}"
-                        if key not in discovered:
+                        if server_id not in discovered:
                             tls_badge = " [TLS 🔒]" if use_tls else ""
                             display_str = f"{server_name}{tls_badge} — {clean_ip}:{tcp_port} ({players} joueur{'s' if players > 1 else ''})"
-                            discovered[key] = {
+                            discovered[server_id] = {
                                 "ip": clean_ip,
                                 "port": tcp_port,
                                 "server_name": server_name,

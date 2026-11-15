@@ -10,6 +10,7 @@ from client.gui import HangmanApp, THEME
 from client.connection import GameClient
 from protocol.message import Message
 from server.server import Server
+import threading
 
 
 class FakeRoot:
@@ -89,6 +90,13 @@ def app_instance(shared_tk):
     app = HangmanApp(shared_tk)
     return app
 
+@pytest.fixture(autouse=True)
+def no_modal_dialogs(monkeypatch):
+    """Empêche les boîtes de dialogue de bloquer les tests."""
+    for name in ("showinfo", "showerror", "showwarning"):
+        monkeypatch.setattr(f"client.gui.messagebox.{name}", lambda *a, **k: None)
+    monkeypatch.setattr("client.gui.messagebox.askyesno", lambda *a, **k: True)
+
 
 def test_gui_initialization(app_instance):
     assert len(app_instance.buttons) == 26
@@ -116,9 +124,9 @@ def test_update_from_state_in_progress(app_instance):
     assert "E" in app_instance.word_var.get()
     assert app_instance.lives_var.get() == "❤️ 5 / 6"
     assert app_instance.errors_var.get() == "💀 1 / 6"
-    assert app_instance.buttons["E"]["state"] == "disabled"
-    assert app_instance.buttons["X"]["state"] == "disabled"
-    assert app_instance.buttons["A"]["state"] == "normal"
+    assert app_instance.buttons["E"].cget("state") == "disabled"
+    assert app_instance.buttons["X"].cget("state") == "disabled"
+    assert app_instance.buttons["A"].cget("state") == "normal"
 
 
 def test_update_from_state_game_over(app_instance, monkeypatch):
@@ -139,7 +147,7 @@ def test_update_from_state_game_over(app_instance, monkeypatch):
     )
     app_instance.update_from_state(resp)
     for btn in app_instance.buttons.values():
-        assert btn["state"] == "disabled"
+        assert btn.cget("state") == "disabled"
 
 
 def test_draw_hangman_stages(app_instance):
@@ -156,13 +164,7 @@ def test_async_queue_and_logging(app_instance):
     assert "[ENVOI]" in content
 
 
-def test_inspector_toggle_and_clear(app_instance):
-    assert app_instance.inspector_visible is True
-    app_instance._toggle_inspector()
-    assert app_instance.inspector_visible is False
-    app_instance._toggle_inspector()
-    assert app_instance.inspector_visible is True
-
+def test_clear_logs(app_instance):
     app_instance.log_network_event("INFO", "msg to clear")
     app_instance._process_gui_queue()
     app_instance._clear_logs()
@@ -188,61 +190,58 @@ def test_dark_light_mode_toggle(app_instance):
     assert ctk.get_appearance_mode().lower() == initial
 
 
-def test_rooms_and_chat_tabs(app_instance):
-    # Test chat send
-    app_instance.chat_entry.insert(0, "Bonjour tout le monde")
-    app_instance._send_chat_message()
-    assert any("Bonjour tout le monde" in msg["text"] for msg in app_instance.chat_history)
-
-    # Test create room
-    app_instance.new_room_entry.insert(0, "Salon Test M1")
-    app_instance._create_room_action()
-    assert app_instance.current_room_name == "Salon Test M1"
-    assert "Salon Test M1" in app_instance.room_badge_var.get()
+def test_chat_tab_has_room_bar_and_filters(app_instance):
+    assert hasattr(app_instance, "room_entry")
+    app_instance._add_chat_line({"player": "Bob", "text": "salut", "scope": "global", "room_id": None})
+    app_instance._add_chat_line({"player": "Alice", "text": "dans le salon", "scope": "room", "room_id": "salon1"})
+    app_instance.current_room_id = "salon1"
+    app_instance.chat_scope_seg.set("Salon Courant")
+    assert [m["text"] for m in app_instance._visible_messages()] == ["dans le salon"]
 
 
-@pytest.mark.asyncio
-async def test_gui_async_integration_with_real_server(shared_tk):
-    """Vérifie l'interaction asynchrone non-bloquante du GUI avec le serveur TCP réel."""
-    server_instance = Server(host="127.0.0.1", port=0)
-    server = await asyncio.start_server(
-        server_instance.recv, server_instance.host, server_instance.port
-    )
-    port = server.sockets[0].getsockname()[1]
+@pytest.fixture
+def real_server():
+    """Serveur TCP réel dans un thread séparé, avec sa propre boucle asyncio."""
+    srv = Server(host="127.0.0.1", port=0)
+    loop = asyncio.new_event_loop()
+    ready = threading.Event()
+    holder = {}
 
-    for child in shared_tk.winfo_children():
-        child.destroy()
+    async def boot():
+        holder["server"] = await asyncio.start_server(srv.recv, "127.0.0.1", 0)
+        holder["port"] = holder["server"].sockets[0].getsockname()[1]
+        ready.set()
+        await holder["server"].serve_forever()
 
-    app = HangmanApp(shared_tk, client=GameClient(host="127.0.0.1", port=port))
+    def run():
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(boot())
+        except asyncio.CancelledError:
+            pass
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    assert ready.wait(timeout=2), "serveur de test non démarré"
+    yield holder["port"]
+    loop.call_soon_threadsafe(holder["server"].close)
+    thread.join(timeout=2)
+
+
+def test_gui_connects_and_plays_on_real_server(app_instance, real_server, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)   # évite d'écrire un session.json dans le projet
+    app = app_instance
     app.host_var.set("127.0.0.1")
-    app.port_var.set(str(port))
+    app.port_var.set(str(real_server))
     app.pseudo_var.set("GuiPlayer")
 
-    async with server:
-        # 1. Connect via GUI
-        app.connect_or_disconnect()
+    app.connect_or_disconnect()   # connexion, HELLO, NEW_GAME, tout en synchrone
 
-        start = time.time()
-        while time.time() - start < 3.0:
-            app._process_gui_queue()
-            if "GuiPlayer" in app.session_info_label.cget("text"):
-                break
-            await asyncio.sleep(0.05)
+    assert app.client.is_connected()
+    assert app.client.session_id is not None
+    assert "GuiPlayer" in app.session_info_label.cget("text")
 
-        assert app.client.is_connected()
-        assert app.client.session_id is not None
-        assert "GuiPlayer" in app.session_info_label.cget("text")
+    app.play("E")
+    assert app.buttons["E"].cget("state") == "disabled"
 
-        # 2. Jouer une lettre via app.play()
-        app.play("E")
-        start = time.time()
-        while time.time() - start < 3.0:
-            app._process_gui_queue()
-            if app.buttons["E"]["state"] == "disabled":
-                break
-            await asyncio.sleep(0.05)
-
-        assert app.buttons["E"]["state"] == "disabled"
-
-        # 3. Quitter proprement
-        app.client.close()
+    app.client.close()

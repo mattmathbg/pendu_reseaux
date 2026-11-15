@@ -39,7 +39,7 @@ def test_discovery_end_to_end():
         found = discover_servers(timeout=1.0, discovery_port=test_udp_port)
         assert len(found) >= 1
         matched = [s for s in found if s["server_name"] == "Serveur Défi M1"]
-        assert 1 <= len(matched) <= 2  # Découvert en IPv4 et/ou IPv6
+        assert len(matched) == 1  # Découvert en IPv4 et/ou IPv6
         s = matched[0]
         assert s["port"] == 8888
         assert s["players_count"] == 3
@@ -54,6 +54,7 @@ def test_discovery_timeout_when_no_server():
     """Vérifie que la fonction de découverte renvoie une liste vide après timeout."""
     found = discover_servers(timeout=0.3, discovery_port=8896)
     assert found == []
+    print("TROUVÉS :", found)
 
 
 def test_discovery_ignores_invalid_packet():
