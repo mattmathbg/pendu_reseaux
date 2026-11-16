@@ -128,23 +128,66 @@ class GameClient:
     def quit_game(self) -> Message:
         """Quitte la partie et détruit la session sur le serveur."""
         resp = self.request("QUIT")
-        if os.path.exists("session.json"):
-            os.remove("session.json")
+        filepath = "session.json"
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                sessions = data.get("sessions", {}) if isinstance(data, dict) else {}
+                if self.player_name in sessions:
+                    del sessions[self.player_name]
+
+                # S'il reste d'autres sessions enregistrées d'autres joueurs
+                if sessions:
+                    next_player, next_data = next(iter(sessions.items()))
+                    data["player_name"] = next_player
+                    data["session_id"] = next_data.get("session_id")
+                    data["auth_token"] = next_data.get("auth_token")
+                    data["sessions"] = sessions
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+                else:
+                    os.remove(filepath)
+            except Exception:
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
+
         self.session_id = None
         self.auth_token = None
         self.auto_reconnect = False
         return resp
 
     def save_session(self, filepath: str = "session.json") -> None:
-        """Sauvegarde les jetons de session dans un fichier JSON pour reprise ultérieure."""
+        """Sauvegarde les jetons de session dans un fichier JSON pour reprise ultérieure.
+        Préserve les sessions des autres joueurs pour éviter l'écrasement mutuel.
+        """
+        sessions = {}
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    old_data = json.load(f)
+                    if isinstance(old_data, dict):
+                        sessions = old_data.get("sessions", {})
+            except Exception:
+                sessions = {}
+
+        if self.player_name and self.session_id:
+            sessions[self.player_name] = {
+                "session_id": self.session_id,
+                "auth_token": self.auth_token,
+            }
+
         data = {
             "player_name": self.player_name,
             "session_id": self.session_id,
             "auth_token": self.auth_token,
+            "sessions": sessions,
         }
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        self._log("INFO", f"Session enregistrée dans {filepath}")
+        self._log("INFO", f"Session enregistrée dans {filepath} pour {self.player_name}")
 
     def load_session(self, filepath: str = "session.json") -> bool:
         """Charge les jetons d'une session sauvegardée."""
@@ -153,12 +196,20 @@ class GameClient:
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.player_name = data.get("player_name", self.player_name)
-            self.session_id = data.get("session_id")
-            self.auth_token = data.get("auth_token")
+            sessions = data.get("sessions", {}) if isinstance(data, dict) else {}
+            # Priorité à la session du joueur actif s'il existe dans le dictionnaire multi-sessions
+            if self.player_name in sessions:
+                p_data = sessions[self.player_name]
+                self.session_id = p_data.get("session_id")
+                self.auth_token = p_data.get("auth_token")
+            else:
+                self.player_name = data.get("player_name", self.player_name)
+                self.session_id = data.get("session_id")
+                self.auth_token = data.get("auth_token")
+
             loaded = bool(self.session_id and self.auth_token)
             if loaded:
-                self._log("INFO", f"Session chargée depuis {filepath} (ID: {self.session_id})")
+                self._log("INFO", f"Session chargée depuis {filepath} (Joueur: {self.player_name}, ID: {self.session_id})")
             return loaded
         except Exception:
             return False
@@ -263,9 +314,12 @@ class GameClient:
             return
         self._process_buffered()
         while True:
-            readable, _, _ = select.select([self.sock], [], [], 0)
-            if not readable:
-                break
+            # En TLS, des octets déjà déchiffrés peuvent être en attente dans le tampon OpenSSL
+            has_pending = hasattr(self.sock, "pending") and self.sock.pending() > 0
+            if not has_pending:
+                readable, _, _ = select.select([self.sock], [], [], 0)
+                if not readable:
+                    break
             chunk = self.sock.recv(4096)
             if not chunk:
                 raise ConnectionError("Le serveur a fermé la connexion")
