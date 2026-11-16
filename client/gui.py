@@ -614,10 +614,16 @@ class HangmanApp:
 
     # --- APPELS RÉSEAU ---
 
-    def _call(self, action: Callable[..., Message], *args: Any, title: str = "Erreur réseau") -> Message | None:
+    def _call(
+        self,
+        action: Callable[..., Message],
+        *args: Any,
+        title: str = "Erreur réseau",
+        **kwargs: Any,
+    ) -> Message | None:
         """Appelle le contrôleur. En cas de coupure, affiche l'erreur et renvoie None."""
         try:
-            return action(*args)
+            return action(*args, **kwargs)
         except (ConnectionError, OSError) as exc:
             self._set_status("Déconnecté", THEME["accent_danger"])
             messagebox.showerror(title, str(exc))
@@ -629,9 +635,10 @@ class HangmanApp:
         *args: Any,
         title: str,
         default: str = "Requête refusée.",
+        **kwargs: Any,
     ) -> Message | None:
         """Comme _call, mais renvoie None aussi si le serveur répond ERROR (avec un avertissement)."""
-        resp = self._call(action, *args, title=title)
+        resp = self._call(action, *args, title=title, **kwargs)
         if resp is None:
             return None
         if resp.type == "ERROR":
@@ -871,8 +878,7 @@ class HangmanApp:
         """Remplit Hôte, Port et TLS avec un serveur découvert."""
         self.host_var.set(s["ip"])
         self.port_var.set(str(s["port"]))
-        if s.get("use_tls"):
-            self.tls_var.set(True)
+        self.tls_var.set(bool(s.get("use_tls", False)))
         self._set_status(f"Serveur sélectionné ({s['ip']})", THEME["accent_success"])
         self._set_feedback(f"Serveur sélectionné : {s['server_name']} ({s['ip']}:{s['port']})", THEME["accent_success"])
 

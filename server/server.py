@@ -46,9 +46,9 @@ class Server:
         enable_discovery: bool = True,
         move_timeout: float = 60.0,
     ) -> None:
-        # Par défaut, écoute Dual-Stack en boucle locale (IPv4 et IPv6)
+        # Par défaut, écoute sur toutes les interfaces réseau (Dual-Stack IPv4 et IPv6)
         if host is None:
-            self.host = ["127.0.0.1", "::1"]
+            self.host = ["0.0.0.0", "::"]
         else:
             self.host = host
         self.port = port

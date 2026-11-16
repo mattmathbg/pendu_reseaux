@@ -289,6 +289,11 @@ def discover_servers(
                                 "use_tls": use_tls,
                                 "display": display_str,
                             }
+                        elif ":" in discovered[server_id]["ip"] and ":" not in clean_ip:
+                            # Préférer l'adresse IPv4 routable à l'adresse IPv6 Link-Local sous Windows
+                            discovered[server_id]["ip"] = clean_ip
+                            tls_badge = " [TLS 🔒]" if use_tls else ""
+                            discovered[server_id]["display"] = f"{server_name}{tls_badge} — {clean_ip}:{tcp_port} ({players} joueur{'s' if players > 1 else ''})"
                 except (UnicodeDecodeError, json.JSONDecodeError, ValueError, OSError):
                     continue
     finally:

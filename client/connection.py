@@ -56,7 +56,20 @@ class GameClient:
     def connect(self) -> None:
         """Établit la connexion TCP (supporte nativement IPv4 et IPv6)."""
         self.framer = StreamFramer()
-        raw_sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+        try:
+            raw_sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+        except OSError as e:
+            # Si la connexion vers l'IP réseau échoue depuis la même machine (ex: pare-feu Windows ou loopback),
+            # tentative de repli automatique sur la boucle locale 127.0.0.1
+            if self.host not in ("127.0.0.1", "localhost", "::1"):
+                try:
+                    raw_sock = socket.create_connection(("127.0.0.1", self.port), timeout=self.timeout)
+                    self._log("CONNEXION", f"Connexion directe à {self.host} échouée, repli automatique sur 127.0.0.1")
+                    self.host = "127.0.0.1"
+                except OSError:
+                    raise e
+            else:
+                raise e
 
         if self.use_tls:
             context = create_client_ssl_context()
