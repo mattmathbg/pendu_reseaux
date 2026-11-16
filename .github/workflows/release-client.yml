@@ -1,0 +1,59 @@
+name: Build and Release Windows Client
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Nom du tag pour la release (ex: v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Configurer Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Installer PyInstaller et les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller customtkinter
+
+      - name: Compiler le client en exécutable autonome (.exe)
+        run: |
+          pyinstaller --noconfirm --onefile --windowed `
+            --name "Pendu" `
+            --collect-all customtkinter `
+            --add-data "certs;certs" `
+            client/gui.py
+
+      - name: Créer l'archive zip
+        run: |
+          Compress-Archive -Path dist\Pendu.exe -DestinationPath dist\Pendu-Windows-x64.zip
+
+      - name: Publier la Release sur GitHub avec l'exécutable
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name || 'v1.0.0' }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name || 'Release Client v1.0.0' }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/Pendu.exe
+            dist/Pendu-Windows-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

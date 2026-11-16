@@ -12,12 +12,18 @@ from protocol.message import Message
 #------------------------------------------------------------------------------
 
 import ssl
+import sys
 from pathlib import Path
 
 def create_client_ssl_context(ca_cert_path: str = "certs/server.crt") -> ssl.SSLContext:
-    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=ca_cert_path)
+    target_path = Path(ca_cert_path)
+    if not target_path.exists() and hasattr(sys, "_MEIPASS"):
+        alt = Path(sys._MEIPASS) / ca_cert_path
+        if alt.exists():
+            target_path = alt
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=str(target_path))
     # Charge le certificat du serveur comme autorité de confiance
-    context.load_verify_locations(cafile=ca_cert_path)
+    context.load_verify_locations(cafile=str(target_path))
     # Vérifie que le CN correspond (ex: localhost)
     context.check_hostname = True
     return context

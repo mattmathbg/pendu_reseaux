@@ -1,26 +1,88 @@
+# 🎮 Pendu Réseau — Architecture Client-Serveur Asynchrone (M1 Informatique)
 
-# Spécification & Feuille de Route — Mini-Projet Réseaux M1 (Pendu Réseau)
+[![CI Tests](https://github.com/mattmathbg/pendu_reseaux/actions/workflows/ci.yml/badge.svg)](https://github.com/mattmathbg/pendu_reseaux/actions/workflows/ci.yml)
+[![Docker Build](https://github.com/mattmathbg/pendu_reseaux/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/mattmathbg/pendu_reseaux/actions/workflows/docker-publish.yml)
+[![Release Client](https://github.com/mattmathbg/pendu_reseaux/actions/workflows/release-client.yml/badge.svg)](https://github.com/mattmathbg/pendu_reseaux/actions/workflows/release-client.yml)
+[![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![Dual-Stack](https://img.shields.io/badge/Réseau-IPv4%20%2F%20IPv6%20Dual--Stack-purple.svg)](#)
+[![Security](https://img.shields.io/badge/Chiffrement-TLS%201.3-success.svg)](#)
+[![License](https://img.shields.io/badge/Licence-MIT-green.svg)](LICENSE)
 
-
-
-## 1. Objectifs & Exigences Fondamentales
-
-* Développer une application client-serveur de jeu du Pendu au-dessus de TCP.
-
-
-* **Serveur autoritaire** : le serveur valide les règles, maintient l'état et calcule la victoire/défaite.
-
-
-* **Framing strict** : isoler les messages applicatifs du flux d'octets continu de TCP.
-
-
-* **Concurrence & Résilience** : gérer plusieurs clients en simultané, les déconnexions inopinées et la reprise de session avec idempotence.
-
-
+Application complète de jeu du Pendu en réseau reposant sur une architecture client-serveur asynchrone hautement concurrente, tolérante aux pannes, chiffrée en TLS et conteneurisée.
 
 ---
 
-## 2. Diagramme de Classes & Architecture (UML)
+## ⚡ Démarrage Rapide
+
+### 1. Pour les Joueurs (Client Windows autonome)
+Aucune installation de Python requise :
+1. Rendez-vous dans la section [**Releases**](https://github.com/mattmathbg/pendu_reseaux/releases) du dépôt.
+2. Téléchargez **`Pendu.exe`** (ou l'archive `Pendu-Windows-x64.zip`).
+3. Double-cliquez pour lancer le jeu avec l'interface CustomTkinter !
+
+---
+
+### 2. Pour les Administrateurs (Serveur Docker distant / VPS)
+Déployez le serveur en une seule commande sur n'importe quel VPS (Linux x86/ARM) sans cloner le dépôt :
+
+```bash
+docker run -d \
+  --name pendu_server \
+  -p 8888:8888 \
+  -p 8889:8889/udp \
+  --restart unless-stopped \
+  ghcr.io/mattmathbg/pendu_reseaux:latest
+```
+
+---
+
+### 3. Pour les Développeurs (Exécution depuis les sources)
+
+#### Prérequis
+```bash
+python -m pip install -r requirements.txt
+```
+
+#### Démarrer le Serveur
+```bash
+# Serveur standard
+python -m server.server
+
+# Serveur sécurisé TLS avec nom d'affichage personnalisé
+python -m server.server --tls --name "Serveur Pendu Master 1"
+```
+
+#### Démarrer le Client Graphique (IHM)
+```bash
+python -m client.gui
+```
+
+---
+
+## 🌟 Points Forts & Fonctionnalités Clés
+
+* **Architecture Asynchrone Haute Concurrence** : Serveur asynchrone bâti sur `asyncio.start_server` gérant de multiples sessions simultanées sans blocage.
+* **Framing Strict au-dessus de TCP** : Utilisation d'un encadrement de trames strict délimité par `\n` (`StreamFramer`) traitant la fragmentation, la concaténation de buffers et les coupures abruptes.
+* **Tolérance aux Pannes & Idempotence** :
+  * Reprise de session transparente (`RESUME` avec `auth_token`) après coupure réseau sans perte de progression.
+  * Détection d'idempotence basée sur `request_id` avec renvoi des réponses en cache sans recalcul côté serveur.
+* **Dual-Stack & Résilience Réseau** : Prise en charge native d'IPv4 (`0.0.0.0`) et IPv6 (`::`), avec repli automatique sur `127.0.0.1` en cas d'inaccessibilité de l'interface hôte.
+* **Découverte Automatique UDP Multicast / Broadcast** :
+  * Multicast IPv4 (`239.255.42.99`, RFC 2365) et Broadcast local.
+  * Multicast IPv6 Link-Local (`ff02::42`, RFC 4291).
+  * Sondage instantané depuis l'interface client (bouton « 🔍 Découvrir »).
+* **Chiffrement TLS 1.3** : Sécurisation intégrale des flux applicatifs via certificats X.509 (`server.crt` / `server.key`).
+* **Dictionnaire Dynamique & Secours Hors-ligne** :
+  * Intégration de l'API de mots avec **27 catégories au choix** (Animaux, Géographie, Cuisine, Sciences, Cinéma, etc.).
+  * Nettoyage automatique des accents et repli immédiat sur liste locale en cas d'indisponibilité de l'accès Internet.
+* **Salons Multi-Joueurs (Lobbies) & Chat Multiplexé** : Salons de jeu (`JOIN_ROOM`, `LEAVE_ROOM`) et canal de discussion textuelle en direct (`CHAT`).
+* **Interface Graphique Moderne (CustomTkinter)** : Thème sombre, clavier interactif, potence vectorielle animée, chronomètre et inspecteur de trames réseau en direct.
+
+---
+
+## 🏗️ Architecture & Spécification du Protocole
+
+### Diagramme de Classes (UML)
 
 ```text
 ┌───────────────────────────────────────────────────────────────┐
@@ -45,13 +107,14 @@
 │ - player_name: str                                            │
 │ - game: HangmanGame                                           │
 │ - is_connected: bool                                          │
-│ - disconnect_timestamp: float | None                          │
+│ - move_timeout: float                                         │
 │ - last_responses: dict[int, dict]  // Cache d'idempotence     │
 ├───────────────────────────────────────────────────────────────┤
 │ + handle_disconnect(ttl_seconds: int)                         │
 │ + reconnect(auth_token: str) -> bool                          │
 │ + save_response(request_id: int, response: dict)              │
 │ + get_cached_response(request_id: int) -> dict | None         │
+│ + is_timed_out() -> bool                                      │
 └───────────────────────────────▲───────────────────────────────┘
                                 │ * gère
 ┌───────────────────────────────┴───────────────────────────────┐
@@ -71,7 +134,7 @@
 │ - handlers: dict[str, Callable]                               │
 ├───────────────────────────────────────────────────────────────┤
 │ + register(msg_type: str, handler: Callable)                  │
-│ + dispatch(msg: ProtocolMessage, session: GameSession)        │
+│ + dispatch(msg: Message, session: GameSession)                │
 └───────────────────────────────▲───────────────────────────────┘
                                 │ traite
 ┌───────────────────────────────┴───────────────────────────────┐
@@ -84,169 +147,98 @@
 │ + get_next_message() -> bytes | None                          │
 │ + frame(data: bytes) -> bytes                                 │
 └───────────────────────────────────────────────────────────────┘
-
 ```
 
 ---
 
-## 3. Spécification Formelle du Protocole
+### Format Universel des Messages
 
-### 3.1 Mécanisme de Framing
-
-
-
-* **Délimiteur** : Saut de ligne UTF-8 `\n` (`0x0A`).
-
-
-* Chaque trame sérialisée se termine obligatoirement par `\n`.
-
-
-* Le récepteur accumule les fragments dans un tampon `bytearray` et n'extrait un message que lorsqu'un `\n` apparaît.
-
-
-
-### 3.2 Structure Universelle de Message
-
-
-
-Tout message échangé est un objet JSON encodé en UTF-8 :
+Chaque trame est sérialisée en JSON UTF-8 et encadrée par un saut de ligne strict `\n` :
 
 ```json
 {
   "type": "STRING",
   "request_id": 1,
-  "session_id": "STRING_OR_NULL",
+  "session_id": "UUID_STRING_OU_NULL",
   "payload": {}
 }
-
 ```
 
-### 3.3 Catalogue des Messages
+### Catalogue des Types de Messages
 
-
-
-| Type | Émetteur | Champs `payload` | Rôle & Réponse attendue |
-| --- | --- | --- | --- |
-| `HELLO`<br> | Client | `{"player_name": str}` | Enregistre le joueur. Réponse : `WELCOME` avec `session_id` et `auth_token`.
-
- |
-| `NEW_GAME`<br> | Client | `{}` | Lance une manche. Réponse : `STATE`.
-
- |
-| `LETTER`<br> | Client | `{"letter": str}` | Propose une lettre. Réponse : `STATE` ou `ERROR`.
-
- |
-| `STATE`<br> | Serveur | `{"masked_word": str, "errors_left": int, "used_letters": list, "status": str}`<br> | État mis à jour de la partie courante.
-
- |
-| `RESUME`<br> | Client | `{"auth_token": str}`<br> | Reprise de session après coupure socket. Réponse : `STATE` ou `ERROR`.
-
- |
-| `ERROR`<br> | Serveur | `{"code": str, "message": str}`<br> | Erreur applicative (`INVALID_STATE`, `UNKNOWN_SESSION`, `BAD_REQUEST`).
-
- |
+| Type | Émetteur | Champs `payload` | Rôle & Réponse |
+| :--- | :--- | :--- | :--- |
+| `HELLO` | Client | `{"player_name": str}` | Authentification initiale. Réponse : `WELCOME` (`session_id`, `auth_token`). |
+| `NEW_GAME` | Client | `{"category_id": int | null}` | Démarre une manche (avec thème optionnel). Réponse : `STATE`. |
+| `LETTER` | Client | `{"letter": str}` | Proposition d'une lettre. Réponse : `STATE` ou `ERROR`. |
+| `STATE` | Serveur | `{"masked_word": str, "errors_left": int, ...}` | Diffusion de l'état actualisé de la partie. |
+| `RESUME` | Client | `{"auth_token": str}` | Restauration de session après coupure socket. Réponse : `STATE` ou `ERROR`. |
+| `JOIN_ROOM` | Client | `{"room_id": str}` | Rejoint un salon multi-joueurs. Réponse : `ROOM_JOINED`. |
+| `LEAVE_ROOM` | Client | `{}` | Quitte le salon courant. Réponse : `ROOM_LEFT`. |
+| `CHAT` | Client/Serveur | `{"text": str, "scope": "room"\|"global"}` | Message textuel instantané diffusé aux pairs. |
+| `QUIT` | Client | `{}` | Abandon ou fin ordonnée de session. Réponse : `BYE`. |
+| `ERROR` | Serveur | `{"code": str, "message": str}` | Erreur applicative (`INVALID_LETTER`, `TIMEOUT`, `UNKNOWN_SESSION`). |
 
 ---
 
-## 4. Machine à États Finis (FSM) de Session
-
-
+### Machine à États Finis (FSM) de Session
 
 ```text
-       [ DECONNECTÉ ]
+       [ DÉCONNECTÉ ]
               │
-         recv(HELLO)
+          recv(HELLO)
               ▼
            [ IDLE ] ◄────────────────────────┐
               │                              │
-        recv(NEW_GAME)                       │
+         recv(NEW_GAME)                       │
               ▼                              │
-         [ EN_COURS ]                        │
+          [ EN_COURS ]                       │
               │                              │
-      ┌───────┼──────────────────┐           │
-      │       │                  │           │
- recv(LETTER) │             Coupure TCP      │
-      │       │                  │           │
-      ▼       │                  ▼           │
-  [ EVAL ]    │        [ DISCONNECTED_WAIT ] │
-      │       │                  │           │
-  ├───┴───────┤              recv(RESUME)    │
-  │           │                  │           │
+       ┌───────┼──────────────────┐           │
+       │       │                  │           │
+  recv(LETTER) │             Coupure TCP      │
+       │       │                  │           │
+       ▼       │                  ▼           │
+   [ EVAL ]    │        [ DISCONNECTED_WAIT ] │
+       │       │                  │           │
+   ├───┴───────┤              recv(RESUME)    │
+   │           │                  │           │
 Victoire   Défaite               └───────────┤
-  │           │                              │
-  ▼           ▼                              │
-[ GAGNÉ ]  [ PERDU ]                         │
-  │           │                              │
-  └───────────┴─── Nouvelle partie ──────────┘
-
+   │           │                              │
+   ▼           ▼                              │
+ [ GAGNÉ ]  [ PERDU ]                         │
+   │           │                              │
+   └───────────┴─── Nouvelle partie ──────────┘
 ```
 
 ---
 
-## 5. Journal des Tâches — Feuille de Route d'Implémentation
+## 🧪 Tests & Intégration Continue (CI / CD)
 
-### Phase 1 : Le Moteur Métier (0 % réseau)
-* [x] Écrire `core/pendu.py` : logique pure du Pendu (mot masqué, vies décomptées, ensemble de lettres).
-* [x] Créer un script de test local vérifiant le comportement sans aucune socket (`test/test_pendu.py`).
+Le projet intègre une suite de tests unitaires et d'intégration validée automatiquement par **GitHub Actions** à chaque contribution :
 
-### Phase 2 : Le Protocole & Le Framing
-* [x] Écrire `protocol/framing.py` : classe `StreamFramer` avec méthode `feed()` et buffer d'accumulation.
-* [x] Tester les 3 pièges de flux TCP : message fragmenté, messages collés dans un seul buffer, flux vide (`test/test_framing.py`).
-* [x] Écrire `protocol/message.py` : sérialisation/désérialisation JSON et contrôle des types (`test/test_message.py`).
-
-### Phase 3 : Sessions, Résilience & Idempotence
-* [x] Écrire `core/session.py` : gestionnaire associant `session_id`, `auth_token` et cache `{request_id: last_response}`.
-* [x] Implémenter le timer de déconnexion (expiration automatique de la session après 60 s) et le nettoyage asynchrone.
-* [x] Tests unitaires complets sur la gestion des sessions et de l'idempotence (`test/test_session.py`).
-
-### Phase 4 : Serveur Concurrent, Client Graphique (GUI) & Reconnexion
-* [x] Mettre en place `server/server.py` avec `asyncio` pour traiter plusieurs connexions en simultané.
-* [x] Développer `client/connection.py` : gestion de socket, retry transparent, idempotence, sauvegarde de session.
-* [x] Développer `client/gui.py` : interface graphique CustomTkinter avec dessin dynamique du Pendu, statut réseau et inspecteur de trames.
-* [x] Tester le scénario de déconnexion brutale et reprise via `RESUME` (`test/test_integration.py`).
-
-### Phase 5 : Extensions Prioritaires (Objectif 20/20)
-* [x] **Dual-Stack IPv4 / IPv6** : socket serveur configurée pour accepter `127.0.0.1` et `::1` simultanément.
-* [ ] **Chiffrement TLS** : sécuriser la socket avec `ssl.create_default_context()`.
-* [ ] **Salons & Mode 1v1 (PvP)** : gestion de lobbies via `ROOM_CREATE` et `ROOM_JOIN`.
-* [ ] **Chat multiplexé** : échange de messages textuels dans la session sans bloquer le jeu.
-
-> 📖 **Consulter le guide détaillé :** Voir [EXPLICATIONS_ARCHITECTURE.md](file:///c:/Users/mmath/Documents/M1/Reseaux/pendu_reseaux/EXPLICATIONS_ARCHITECTURE.md) pour l'explication pas-à-pas du paquet réseau, du framing et de la résilience.
-
-## Lancer le serveur avec Docker
-
-### Option A : Depuis l'image officielle publiée (GitHub Container Registry)
-
-Idéal pour déployer instantanément sur un VPS ou un serveur distant sans cloner le dépôt :
-
-```sh
-docker run -d --name pendu_server -p 8888:8888 -p 8889:8889/udp --restart unless-stopped ghcr.io/mattmathbg/pendu_reseaux:latest
+```bash
+# Exécution de la suite de tests avec pytest
+pytest -v
 ```
 
-### Option B : Avec Docker Compose (développement local)
+### Pipelines Automatisés
+- **CI Tests** (`.github/workflows/ci.yml`) : Exécution automatisée sous Linux Ubuntu avec serveur X virtuel (`xvfb`) pour les tests d'interface.
+- **CD Docker Registry** (`.github/workflows/docker-publish.yml`) : Construction multi-architecture (`linux/amd64`, `linux/arm64`) et publication sur **GitHub Container Registry** (`ghcr.io`).
+- **CD Windows Client** (`.github/workflows/release-client.yml`) : Compilation PyInstaller et publication de l'exécutable autonome `Pendu.exe` dans les GitHub Releases.
 
-Docker Compose permet de construire et d'exécuter le serveur asynchrone sur le réseau bridge `pendu_bridge` :
+---
 
-1. Démarrer le serveur en arrière-plan :
+## 📚 Documentation Complémentaire
 
-   ```sh
-   docker compose up -d --build server
-   ```
+- 📖 [EXPLICATIONS_ARCHITECTURE.md](EXPLICATIONS_ARCHITECTURE.md) : Analyse détaillée du paquet réseau, du framing et des mécanismes de résilience.
+- 📡 [EXPLICATIONS_DECOUVERTE_SERVEUR.md](EXPLICATIONS_DECOUVERTE_SERVEUR.md) : Fonctionnement du protocole de découverte UDP Multicast / Broadcast.
+- 📐 [DESIGN.md](DESIGN.md) : Conception logicielle, choix de design et séparation des responsabilités.
+- 📜 [Conception_du_protocole_applicatif.md](Conception_du_protocole_applicatif.md) : Spécification formelle initiale du protocole applicatif.
 
-   Pour afficher ses journaux en temps réel : `docker compose logs -f server`.
+---
 
-2. Lancer l'interface graphique client (GUI) sur votre machine hôte :
+## 👥 Auteur & Licence
 
-   ```sh
-   python -m client.gui
-   ```
-
-   Connectez-vous à `127.0.0.1:8888` (le port est exposé sur la machine hôte).
-
-3. Arrêter le conteneur serveur :
-
-   ```sh
-   docker compose down
-   ```
-
-Le serveur écoute sur `0.0.0.0` dans son conteneur afin d'accepter les requêtes transmises depuis l'extérieur du réseau de conteneurs. Le port `8888` est exposé sur la machine hôte (`localhost:8888`).
+- Projet réalisé dans le cadre du **Master 1 Informatique — Module Réseaux**.
+- Distribué sous licence **MIT**.
