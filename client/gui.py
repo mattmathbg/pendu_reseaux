@@ -1,6 +1,6 @@
 import os
-import sys
 import queue
+import sys
 import threading
 import time
 from datetime import datetime
@@ -8,13 +8,13 @@ from string import ascii_uppercase
 import tkinter as tk
 from tkinter import messagebox
 from typing import Any, Callable
-from client.controller import GameController
 
 import customtkinter as ctk
 
 from client.connection import GameClient
-from protocol.message import Message
+from client.controller import GameController
 from protocol.discovery import discover_servers
+from protocol.message import Message
 
 # Résolution des bibliothèques Tcl/Tk sous Windows si nécessaire
 if "TCL_LIBRARY" not in os.environ:
@@ -32,24 +32,134 @@ END_MESSAGES = {
     "ABANDONNE": "Partie abandonnée.",
 }
 
-# Palette CustomTkinter Bivalente (Mode Clair, Mode Sombre)
+# Palette unique (mode sombre)
 THEME = {
-    "bg_base": ("#F1F5F9", "#0F1218"),
-    "bg_card": ("#FFFFFF", "#181C24"),
-    "bg_elevated": ("#E2E8F0", "#222734"),
-    "bg_hover": ("#CBD5E1", "#2D3446"),
-    "border": ("#CBD5E1", "#2D3444"),
-    "text_primary": ("#0F172A", "#F8FAFC"),
-    "text_secondary": ("#64748B", "#94A3B8"),
-    "text_muted": ("#94A3B8", "#5A6578"),
-    "accent_primary": ("#0284C7", "#38BDF8"),
-    "accent_success": ("#16A34A", "#00E676"),
-    "accent_success_bg": ("#DCFCE7", "#0E4D2B"),
-    "accent_danger": ("#DC2626", "#FF5252"),
-    "accent_danger_bg": ("#FEE2E2", "#4A191F"),
-    "accent_warning": ("#D97706", "#F59E0B"),
+    "bg_card": "#181C24",
+    "bg_elevated": "#222734",
+    "bg_hover": "#2D3446",
+    "border": "#2D3444",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#94A3B8",
+    "text_muted": "#5A6578",
+    "accent_primary": "#38BDF8",
+    "accent_success": "#00E676",
+    "accent_success_bg": "#0E4D2B",
+    "accent_danger": "#FF5252",
+    "accent_danger_bg": "#4A191F",
+    "accent_warning": "#F59E0B",
 }
 
+DANGER_BTN = ("#DC2626", "#B91C1C")
+
+# Potence en texte : une étape par nombre d'erreurs (0 à 6)
+HANGMAN_STAGES = [
+    "  +---+\n  |   |\n      |\n      |\n      |\n      |\n=========",
+    "  +---+\n  |   |\n  O   |\n      |\n      |\n      |\n=========",
+    "  +---+\n  |   |\n  O   |\n  |   |\n      |\n      |\n=========",
+    "  +---+\n  |   |\n  O   |\n /|   |\n      |\n      |\n=========",
+    "  +---+\n  |   |\n  O   |\n /|\\  |\n      |\n      |\n=========",
+    "  +---+\n  |   |\n  O   |\n /|\\  |\n /    |\n      |\n=========",
+    "  +---+\n  |   |\n  O   |\n /|\\  |\n / \\  |\n      |\n=========",
+]
+
+KEYBOARD_ROWS = [
+    ascii_uppercase[:9],    # A - I
+    ascii_uppercase[9:18],  # J - R
+    ascii_uppercase[18:],   # S - Z
+]
+
+LOG_COLORS = {
+    "ENVOI": "#38BDF8",
+    "REÇU": "#00E676",
+    "CONNEXION": "#A78BFA",
+    "RECONNEXION": "#F59E0B",
+    "ERREUR": "#FF5252",
+    "INFO": "#94A3B8",
+}
+
+
+# --- Helpers de construction des widgets ---
+
+def _font(size: int, bold: bool = False, family: str | None = None) -> ctk.CTkFont:
+    options: dict[str, Any] = {"size": size, "weight": "bold" if bold else "normal"}
+    if family:
+        options["family"] = family
+    return ctk.CTkFont(**options)
+
+
+def _packed(widget: Any, **pack_opts: Any) -> Any:
+    """Pack le widget et le renvoie, pour pouvoir l'affecter directement."""
+    widget.pack(**pack_opts)
+    return widget
+
+
+def _label(
+    parent: Any,
+    text: str | None = None,
+    size: int = 12,
+    bold: bool = False,
+    color: str | None = None,
+    family: str | None = None,
+    **kw: Any,
+) -> ctk.CTkLabel:
+    if text is not None:
+        kw["text"] = text
+    return ctk.CTkLabel(parent, font=_font(size, bold, family), text_color=color or THEME["text_primary"], **kw)
+
+
+def _button(
+    parent: Any,
+    text: str,
+    command: Callable[[], Any],
+    fg: str,
+    hover: str,
+    txt: str | None = None,
+    size: int = 12,
+    bold: bool = False,
+    **kw: Any,
+) -> ctk.CTkButton:
+    kw.setdefault("height", 32)
+    return ctk.CTkButton(
+        parent,
+        text=text,
+        command=command,
+        fg_color=fg,
+        hover_color=hover,
+        text_color=txt or THEME["text_primary"],
+        font=_font(size, bold),
+        **kw,
+    )
+
+
+def _badge(parent: Any, var: tk.StringVar, color: str) -> ctk.CTkLabel:
+    return ctk.CTkLabel(
+        parent,
+        textvariable=var,
+        font=_font(12, bold=True),
+        text_color=color,
+        fg_color=THEME["bg_elevated"],
+        corner_radius=8,
+        padx=12,
+        pady=4,
+    )
+
+
+def _card(parent: Any, **pack_opts: Any) -> ctk.CTkFrame:
+    frame = ctk.CTkFrame(
+        parent,
+        corner_radius=12,
+        fg_color=THEME["bg_card"],
+        border_width=1,
+        border_color=THEME["border"],
+    )
+    return _packed(frame, **pack_opts)
+
+
+def _labeled_entry(parent: Any, label: str, var: tk.StringVar, width: int) -> ctk.CTkEntry:
+    _label(parent, label, color=THEME["text_secondary"]).pack(side="left", padx=(0, 4))
+    entry = ctk.CTkEntry(parent, textvariable=var, width=width, height=28, font=_font(12))
+    entry.pack(side="left", padx=(0, 10))
+    return entry
 
 
 class HangmanApp:
@@ -57,54 +167,40 @@ class HangmanApp:
         if root is None:
             ctk.set_appearance_mode("dark")
             ctk.set_default_color_theme("blue")
-            self.root = ctk.CTk()
-           
-        else:
-            self.root = root
-        
+            root = ctk.CTk()
+        self.root = root
 
         self.client = client or GameClient("127.0.0.1", 8888)
         self.controller = GameController(self.client)
+        self._is_busy = False
+        self._gui_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._timer_started_at: float | None = None
         self._timer_after_id: str | None = None
-        self._gui_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
-        
-
-        self._current_errors: int = 0
-        self._current_status: str | None = None
         self.current_room_id: str | None = None
-        
+        self.chat_history: list[dict[str, Any]] = []
 
-        self.root.title("🎯 Pendu Réseau M1 — CustomTkinter Game Client")
+        self.root.title("🎯 Pendu Réseau M1 — Client")
         self.root.geometry("1080x830")
         self.root.minsize(960, 740)
 
-        # Branchement des logs réseau
         self.client.log_callback = self.log_network_event
 
         self._init_vars()
         self._build_ui()
         self._bind_events()
-        self._redraw_current_canvas()
 
-        # Démarrage de la boucle de consommation de la file asynchrone
-        self.root.after(30, self._process_gui_queue)
-
-        # Détection d'une session locale sauvegardée
         self._check_saved_session()
-
-        # Initialisation du statut de connexion
         if self.client.is_connected():
-            self._set_status(f"Connecté à {self.client.host}:{self.client.port}", "#00E676")
-            self.connect_btn.configure(text="🔴 Déconnecter", fg_color=("#DC2626", "#B91C1C"))
+            self._mark_connected()
         else:
-            self._set_status("Déconnecté", "#FF5252")
+            self._set_status("Déconnecté", THEME["accent_danger"])
 
+        self.root.after(30, self._process_gui_queue)
         self.root.after(200, self._refresh)
 
+    # --- INITIALISATION ---
+
     def _init_vars(self) -> None:
-        """Initialise les variables d'état et d'affichage."""
-        self._is_busy: bool = False
         self.host_var = tk.StringVar(value=self.client.host or "127.0.0.1")
         self.port_var = tk.StringVar(value=str(self.client.port or 8888))
         self.tls_var = tk.BooleanVar(value=False)
@@ -116,342 +212,158 @@ class HangmanApp:
         self.lives_var = tk.StringVar(value="❤️ 6 / 6")
         self.errors_var = tk.StringVar(value="💀 0 / 6")
         self.feedback_var = tk.StringVar(value="Bienvenue ! Connectez-vous et lancez une manche.")
-
+        self.hangman_var = tk.StringVar(value=HANGMAN_STAGES[0])
         self.room_badge_var = tk.StringVar(value="🏠 Salon : aucun")
-       
-
-      
-        self.chat_history: list[dict[str, Any]] = []
 
     def _build_ui(self) -> None:
-        """Construit l'interface graphique moderne CustomTkinter."""
-        self.main_container = ctk.CTkFrame(self.root, corner_radius=0, fg_color="transparent")
-        self.main_container.pack(fill="both", expand=True, padx=16, pady=12)
+        container = ctk.CTkFrame(self.root, corner_radius=0, fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=16, pady=12)
 
-        # 1. BANDEAU SUPÉRIEUR : Branding, Statut, Dark/Light Switch & Connexion
-        self._build_top_header(self.main_container)
+        self._build_header(container)
 
-        # 2. NAVIGATION PAR ONGLETS (Jeu, Chat, Inspecteur)
-        self.tabview = ctk.CTkTabview(self.main_container, corner_radius=14)
+        self.tabview = ctk.CTkTabview(container, corner_radius=14)
         self.tabview.pack(fill="both", expand=True, pady=(6, 0))
+        self._build_game_tab(self.tabview.add("🎮 Plateau de Jeu"))
+        self._build_chat_tab(self.tabview.add("💬 Chat en Direct"))
+        self._build_inspector_tab(self.tabview.add("🔍 Inspecteur Réseau"))
 
-        self.tab_game = self.tabview.add("🎮 Plateau de Jeu")
-        self.tab_chat = self.tabview.add("💬 Chat en Direct")
-        self.tab_inspector = self.tabview.add("🔍 Inspecteur Réseau")
+    def _bind_events(self) -> None:
+        self.root.bind("<Key>", self._on_key_press)
+        for entry in (self.host_entry, self.port_entry, self.pseudo_entry):
+            entry.bind("<Return>", lambda _: self.connect_or_disconnect())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Construction des contenus de chaque onglet
-        self._build_game_tab(self.tab_game)
-        self._build_chat_tab(self.tab_chat)
-        self._build_inspector_tab(self.tab_inspector)
+    # --- BANDEAU SUPÉRIEUR ---
 
-    def _build_top_header(self, parent: ctk.CTkFrame) -> None:
-        """Construit la barre supérieure avec switch d'apparence et formulaire de connexion."""
-        header_card = ctk.CTkFrame(parent, corner_radius=12, fg_color=THEME["bg_card"], border_width=1, border_color=THEME["border"])
-        header_card.pack(fill="x", pady=(0, 6), padx=2)
+    def _build_header(self, parent: Any) -> None:
+        card = _card(parent, fill="x", pady=(0, 6), padx=2)
 
-        # Ligne 1 : Titre, Badges de statut et Switch Dark/Light Mode
-        row1 = ctk.CTkFrame(header_card, fg_color="transparent")
+        row1 = ctk.CTkFrame(card, fg_color="transparent")
         row1.pack(fill="x", padx=14, pady=(10, 6))
+        _label(row1, "🎮 PENDU RÉSEAU", size=18, bold=True, color=THEME["accent_primary"]).pack(side="left")
 
-        title_box = ctk.CTkFrame(row1, fg_color="transparent")
-        title_box.pack(side="left")
-
-        ctk.CTkLabel(
-            title_box,
-            text="🎮 PENDU RÉSEAU",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color=THEME["accent_primary"],
-        ).pack(side="left", padx=(0, 8))
-
-        ctk.CTkLabel(
-            title_box,
-            text="Client Moderne CustomTkinter",
-            font=ctk.CTkFont(size=11),
-            text_color=THEME["text_secondary"],
-        ).pack(side="left", pady=(3, 0))
-
-        # Droite : Switch de thème et Badges d'état
-        right_box = ctk.CTkFrame(row1, fg_color="transparent")
-        right_box.pack(side="right")
-
-        # Switch Thème Clair / Sombre
-        self.mode_switch = ctk.CTkSwitch(
-            right_box,
-            text="Mode Sombre",
-            font=ctk.CTkFont(size=12),
-            command=self._toggle_appearance_mode,
-        )
-        self.mode_switch.select()
-        self.mode_switch.pack(side="left", padx=(0, 16))
-
-        # Indicateur LED
-        self.status_canvas = tk.Canvas(right_box, width=14, height=14, highlightthickness=0, bg="#181C24")
-        self.status_circle = self.status_canvas.create_oval(2, 2, 12, 12, fill="#FF5252", outline="")
+        status_box = ctk.CTkFrame(row1, fg_color="transparent")
+        status_box.pack(side="right")
+        self.status_canvas = tk.Canvas(status_box, width=14, height=14, highlightthickness=0, bg=THEME["bg_card"])
+        self.status_circle = self.status_canvas.create_oval(2, 2, 12, 12, fill=THEME["accent_danger"], outline="")
         self.status_canvas.pack(side="left", padx=(0, 6))
-
-        self.status_label = ctk.CTkLabel(
-            right_box,
-            text="Déconnecté",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=THEME["text_primary"],
+        self.status_label = _packed(_label(status_box, "Déconnecté", bold=True), side="left", padx=(0, 10))
+        self.session_info_label = _packed(
+            _label(status_box, "", size=11, color=THEME["accent_primary"], family="Consolas"), side="left"
         )
-        self.status_label.pack(side="left", padx=(0, 10))
 
-        self.session_info_label = ctk.CTkLabel(
-            right_box,
-            text="",
-            font=ctk.CTkFont(family="Consolas", size=11),
-            text_color=THEME["accent_primary"],
-        )
-        self.session_info_label.pack(side="left")
+        form = ctk.CTkFrame(card, fg_color="transparent")
+        form.pack(fill="x", padx=14, pady=(0, 10))
 
-        # Ligne 2 : Formulaire de connexion dynamique
-        form_row = ctk.CTkFrame(header_card, fg_color="transparent")
-        form_row.pack(fill="x", padx=14, pady=(0, 10))
-        
-        self.tls_check = ctk.CTkCheckBox(form_row, text="TLS", variable=self.tls_var, width=60, font=ctk.CTkFont(size=12))
+        self.tls_check = ctk.CTkCheckBox(form, text="TLS", variable=self.tls_var, width=60, font=_font(12))
         self.tls_check.pack(side="left", padx=(0, 8))
 
-        ctk.CTkLabel(form_row, text="Hôte :", font=ctk.CTkFont(size=12), text_color=THEME["text_secondary"]).pack(side="left", padx=(0, 4))
-        self.host_entry = ctk.CTkEntry(form_row, textvariable=self.host_var, width=120, height=28, font=ctk.CTkFont(size=12))
-        self.host_entry.pack(side="left", padx=(0, 10))
+        self.host_entry = _labeled_entry(form, "Hôte :", self.host_var, 120)
+        self.port_entry = _labeled_entry(form, "Port :", self.port_var, 70)
+        self.pseudo_entry = _labeled_entry(form, "Pseudo :", self.pseudo_var, 100)
 
-        ctk.CTkLabel(form_row, text="Port :", font=ctk.CTkFont(size=12), text_color=THEME["text_secondary"]).pack(side="left", padx=(0, 4))
-        self.port_entry = ctk.CTkEntry(form_row, textvariable=self.port_var, width=70, height=28, font=ctk.CTkFont(size=12))
-        self.port_entry.pack(side="left", padx=(0, 10))
-
-        ctk.CTkLabel(form_row, text="Pseudo :", font=ctk.CTkFont(size=12), text_color=THEME["text_secondary"]).pack(side="left", padx=(0, 4))
-        self.pseudo_entry = ctk.CTkEntry(form_row, textvariable=self.pseudo_var, width=100, height=28, font=ctk.CTkFont(size=12))
-        self.pseudo_entry.pack(side="left", padx=(0, 12))
-
-        self.connect_btn = ctk.CTkButton(
-            form_row,
-            text="🔌 Connexion",
-            height=28,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=THEME["accent_primary"],
-            hover_color="#0284C7",
-            command=self.connect_or_disconnect,
+        self.connect_btn = _packed(
+            _button(form, "🔌 Connexion", self.connect_or_disconnect,
+                    THEME["accent_primary"], "#0284C7", size=12, bold=True, height=28),
+            side="left", padx=(0, 8),
         )
-        self.connect_btn.pack(side="left", padx=(0, 8))
-
-        self.resume_btn = ctk.CTkButton(
-            form_row,
-            text="🔄 Reprendre session",
-            height=28,
-            font=ctk.CTkFont(size=12),
-            fg_color=THEME["bg_elevated"],
-            hover_color=THEME["bg_hover"],
-            text_color=THEME["text_primary"],
-            command=self.resume_existing_session,
+        self.resume_btn = _packed(
+            _button(form, "🔄 Reprendre session", self.resume_existing_session,
+                    THEME["bg_elevated"], THEME["bg_hover"], THEME["text_primary"], height=28),
+            side="left", padx=(0, 8),
         )
-        self.resume_btn.pack(side="left", padx=(0, 8))
-
-        self.discover_btn = ctk.CTkButton(
-            form_row,
-            text="🔍 Découvrir",
-            height=28,
-            width=90,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=THEME["bg_elevated"],
-            hover_color=THEME["bg_hover"],
-            text_color=THEME["accent_primary"],
-            command=self.discover_local_servers,
+        self.discover_btn = _packed(
+            _button(form, "🔍 Découvrir", self.discover_local_servers,
+                    THEME["bg_elevated"], THEME["bg_hover"], THEME["accent_primary"], bold=True, height=28, width=90),
+            side="left", padx=(0, 12),
         )
-        self.discover_btn.pack(side="left", padx=(0, 12))
-
-        # Badge salon actif
-        self.room_badge = ctk.CTkLabel(
-            form_row,
-            textvariable=self.room_badge_var,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=THEME["accent_warning"],
+        _packed(
+            _label(form, bold=True, color=THEME["accent_warning"], textvariable=self.room_badge_var),
+            side="right",
         )
-        self.room_badge.pack(side="right")
 
-    # --- ONGLET 1 : JEU DU PENDU ---
+    # --- ONGLET 1 : JEU ---
 
-    def _build_game_tab(self, parent: ctk.CTkFrame) -> None:
-        """Construit le plateau de jeu du pendu avec potence Canvas, mot masqué et clavier virtuel."""
-        top_split = ctk.CTkFrame(parent, fg_color="transparent")
-        top_split.pack(fill="x", padx=12, pady=(8, 4))
+    def _build_game_tab(self, parent: Any) -> None:
+        top = ctk.CTkFrame(parent, fg_color="transparent")
+        top.pack(fill="x", padx=12, pady=(8, 4))
 
-        # Carte gauche : Canvas vectoriel de la potence
-        canvas_card = ctk.CTkFrame(top_split, corner_radius=12, fg_color=THEME["bg_card"], border_width=1, border_color=THEME["border"])
-        canvas_card.pack(side="left", padx=(0, 10), pady=4)
-
-        self.canvas = tk.Canvas(
-            canvas_card,
-            width=260,
-            height=200,
-            highlightthickness=0,
-            bg="#14171F",
+        hangman_card = _card(top, side="left", padx=(0, 10), pady=4)
+        _label(hangman_card, textvariable=self.hangman_var, size=14, family="Consolas", justify="left").pack(
+            padx=16, pady=12
         )
-        self.canvas.pack(padx=8, pady=8)
 
-        # Carte droite : Mot masqué + Badges statistiques + Feedback
-        info_card = ctk.CTkFrame(top_split, corner_radius=12, fg_color=THEME["bg_card"], border_width=1, border_color=THEME["border"])
-        info_card.pack(side="right", fill="both", expand=True, pady=4)
+        info_card = _card(top, side="right", fill="both", expand=True, pady=4)
+        _label(info_card, textvariable=self.word_var, size=34, bold=True, family="Consolas").pack(pady=(16, 10))
 
-        # Mot masqué grand format
-        self.word_label = ctk.CTkLabel(
-            info_card,
-            textvariable=self.word_var,
-            font=ctk.CTkFont(family="Consolas", size=34, weight="bold"),
-            text_color=THEME["text_primary"],
+        badges = ctk.CTkFrame(info_card, fg_color="transparent")
+        badges.pack(pady=(0, 8))
+        for var, color in (
+            (self.timer_var, THEME["accent_primary"]),
+            (self.lives_var, THEME["accent_success"]),
+            (self.errors_var, THEME["accent_danger"]),
+        ):
+            _badge(badges, var, color).pack(side="left", padx=4)
+
+        self.feedback_label = _packed(
+            _label(info_card, textvariable=self.feedback_var, color=THEME["text_secondary"]), pady=(0, 10)
         )
-        self.word_label.pack(pady=(16, 10))
 
-        # Ligne de badges de statistiques
-        badges_frame = ctk.CTkFrame(info_card, fg_color="transparent")
-        badges_frame.pack(pady=(0, 8))
-
-        self.timer_badge = ctk.CTkLabel(
-            badges_frame,
-            textvariable=self.timer_var,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=THEME["bg_elevated"],
-            text_color=THEME["accent_primary"],
-            corner_radius=8,
-            padx=12,
-            pady=4,
-        )
-        self.timer_badge.pack(side="left", padx=4)
-
-        self.lives_badge = ctk.CTkLabel(
-            badges_frame,
-            textvariable=self.lives_var,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=THEME["bg_elevated"],
-            text_color=THEME["accent_success"],
-            corner_radius=8,
-            padx=12,
-            pady=4,
-        )
-        self.lives_badge.pack(side="left", padx=4)
-
-        self.errors_badge = ctk.CTkLabel(
-            badges_frame,
-            textvariable=self.errors_var,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=THEME["bg_elevated"],
-            text_color=THEME["accent_danger"],
-            corner_radius=8,
-            padx=12,
-            pady=4,
-        )
-        self.errors_badge.pack(side="left", padx=4)
-
-        # Feedback textuel
-        self.feedback_label = ctk.CTkLabel(
-            info_card,
-            textvariable=self.feedback_var,
-            font=ctk.CTkFont(size=12),
-            text_color=THEME["text_secondary"],
-        )
-        self.feedback_label.pack(pady=(0, 10))
-
-        # Carte Clavier Virtuel Interactif A-Z
-        keyboard_card = ctk.CTkFrame(parent, corner_radius=12, fg_color=THEME["bg_card"], border_width=1, border_color=THEME["border"])
-        keyboard_card.pack(fill="x", padx=12, pady=(4, 6))
-
-        ctk.CTkLabel(
-            keyboard_card,
-            text="CLAVIER VIRTUEL (CLIQUEZ OU TAPEZ SUR VOTRE CLAVIER PHYSIQUE)",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color=THEME["text_secondary"],
+        # Clavier virtuel
+        keyboard = _card(parent, fill="x", padx=12, pady=(4, 6))
+        _label(
+            keyboard,
+            "CLAVIER VIRTUEL (CLIQUEZ OU TAPEZ SUR VOTRE CLAVIER PHYSIQUE)",
+            size=10, bold=True, color=THEME["text_secondary"],
         ).pack(pady=(6, 4))
 
         self.buttons: dict[str, ctk.CTkButton] = {}
-        rows = [
-            list(ascii_uppercase[:9]),     # A - I
-            list(ascii_uppercase[9:18]),   # J - R
-            list(ascii_uppercase[18:]),    # S - Z
-        ]
-
-        for row_letters in rows:
-            r_frame = ctk.CTkFrame(keyboard_card, fg_color="transparent")
-            r_frame.pack(pady=2)
-            for letter in row_letters:
-                btn = ctk.CTkButton(
-                    r_frame,
-                    text=letter,
-                    width=42,
-                    height=36,
-                    corner_radius=8,
-                    font=ctk.CTkFont(size=13, weight="bold"),
-                    fg_color=THEME["bg_elevated"],
-                    hover_color=THEME["bg_hover"],
-                    text_color=THEME["text_primary"],
-                    command=lambda l=letter: self.play(l),
+        for row in KEYBOARD_ROWS:
+            line = ctk.CTkFrame(keyboard, fg_color="transparent")
+            line.pack(pady=2)
+            for letter in row:
+                self.buttons[letter] = _packed(
+                    _button(
+                        line, letter, lambda l=letter: self.play(l),
+                        THEME["bg_elevated"], THEME["bg_hover"], THEME["text_primary"],
+                        size=13, bold=True, width=42, height=36, corner_radius=8,
+                    ),
+                    side="left", padx=3,
                 )
-                btn.pack(side="left", padx=3)
-                self.buttons[letter] = btn
 
-        # Actions de jeu
-        actions_bar = ctk.CTkFrame(parent, fg_color="transparent")
-        actions_bar.pack(pady=6)
-
-        self.new_game_btn = ctk.CTkButton(
-            actions_bar,
-            text="✨ Nouvelle Manche",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=THEME["accent_success"],
-            hover_color="#15803D",
-            text_color="#052410",
-            height=34,
-            command=self.start_new_game,
+        actions = ctk.CTkFrame(parent, fg_color="transparent")
+        actions.pack(pady=6)
+        self.new_game_btn = _packed(
+            _button(actions, "✨ Nouvelle Manche", self.start_new_game,
+                    THEME["accent_success"], "#15803D", "#052410", bold=True, height=34),
+            side="left", padx=6,
         )
-        self.new_game_btn.pack(side="left", padx=6)
-
-        self.quit_btn = ctk.CTkButton(
-            actions_bar,
-            text="🚪 Abandonner",
-            font=ctk.CTkFont(size=12),
-            fg_color=THEME["accent_danger"],
-            hover_color="#991B1B",
-            text_color="white",
-            height=34,
-            command=self.quit_game,
+        self.quit_btn = _packed(
+            _button(actions, "🚪 Abandonner", self.quit_game,
+                    THEME["accent_danger"], "#991B1B", "white", height=34),
+            side="left", padx=6,
         )
-        self.quit_btn.pack(side="left", padx=6)
-
-        self.disconnect_sim_btn = ctk.CTkButton(
-            actions_bar,
-            text="⚡ Coupure simulée (Idempotence)",
-            font=ctk.CTkFont(size=12),
-            fg_color=THEME["bg_elevated"],
-            hover_color=THEME["bg_hover"],
-            text_color=THEME["accent_warning"],
-            height=34,
-            command=self.simulate_disconnect,
+        self.disconnect_sim_btn = _packed(
+            _button(actions, "⚡ Coupure simulée (Idempotence)", self.simulate_disconnect,
+                    THEME["bg_elevated"], THEME["bg_hover"], THEME["accent_warning"], height=34),
+            side="left", padx=6,
         )
-        self.disconnect_sim_btn.pack(side="left", padx=6)
 
-    # --- ONGLET 2 : CHAT EN DIRECT (EXTENSION C) ---
+    # --- ONGLET 2 : CHAT ET SALONS ---
 
-    def _build_chat_tab(self, parent: ctk.CTkFrame) -> None:
-        """Construit le salon de discussion multi-joueurs (Extension C)."""
-        chat_top = ctk.CTkFrame(parent, fg_color="transparent")
-        chat_top.pack(fill="x", padx=14, pady=(8, 4))
+    def _build_chat_tab(self, parent: Any) -> None:
+        top = ctk.CTkFrame(parent, fg_color="transparent")
+        top.pack(fill="x", padx=14, pady=(8, 4))
+        _label(top, "💬 Discussion en direct avec les joueurs", size=14, bold=True).pack(side="left")
 
-        ctk.CTkLabel(
-            chat_top,
-            text="💬 Discussion en direct avec les joueurs",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-
-        # Sélecteur de portée de chat (Salon ou Global)
         self.chat_scope_seg = ctk.CTkSegmentedButton(
-            chat_top,
+            top,
             values=["Salon Courant", "Chat Global"],
             command=self._on_chat_scope_change,
         )
         self.chat_scope_seg.set("Salon Courant")
         self.chat_scope_seg.pack(side="right")
 
-        # Zone des messages scrollable
         self.chat_messages_frame = ctk.CTkScrollableFrame(
             parent,
             corner_radius=12,
@@ -462,38 +374,24 @@ class HangmanApp:
         )
         self.chat_messages_frame.pack(fill="both", expand=True, padx=14, pady=4)
 
-        # Affichage des messages initiaux
-        self._refresh_chat_display()
-
-        # Barre de saisie de message
         input_bar = ctk.CTkFrame(parent, fg_color="transparent")
         input_bar.pack(fill="x", padx=14, pady=(6, 10))
-
         self.chat_entry = ctk.CTkEntry(
             input_bar,
             placeholder_text="Écrivez votre message... (Appuyez sur Entrée pour envoyer)",
             height=36,
-            font=ctk.CTkFont(size=12),
+            font=_font(12),
         )
         self.chat_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.chat_entry.bind("<Return>", lambda _: self._send_chat_message())
-
-        self.chat_send_btn = ctk.CTkButton(
-            input_bar,
-            text="Envoyer 🚀",
-            width=100,
-            height=36,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=THEME["accent_primary"],
-            hover_color="#0284C7",
-            command=self._send_chat_message,
+        self.chat_send_btn = _packed(
+            _button(input_bar, "Envoyer 🚀", self._send_chat_message,
+                    THEME["accent_primary"], "#0284C7", bold=True, height=36, width=100),
+            side="right",
         )
-        self.chat_send_btn.pack(side="right")
 
-        # Barre de salon : rejoindre / quitter
         room_bar = ctk.CTkFrame(parent, fg_color="transparent")
         room_bar.pack(fill="x", padx=14, pady=(0, 10))
-
         self.room_entry = ctk.CTkEntry(
             room_bar,
             placeholder_text="Nom du salon (1 à 20 caractères)",
@@ -501,33 +399,24 @@ class HangmanApp:
             width=260,
         )
         self.room_entry.pack(side="left", padx=(0, 8))
+        _packed(
+            _button(room_bar, "➡️ Rejoindre", self._join_room_from_entry,
+                    THEME["accent_primary"], "#0284C7", height=32, width=110),
+            side="left", padx=(0, 8),
+        )
+        _packed(
+            _button(room_bar, "🚪 Quitter le salon", self._leave_room_action,
+                    THEME["accent_danger"], "#991B1B", height=32, width=150),
+            side="left",
+        )
 
-        ctk.CTkButton(
-            room_bar,
-            text="➡️ Rejoindre",
-            width=110,
-            height=32,
-            fg_color=THEME["accent_primary"],
-            hover_color="#0284C7",
-            command=self._join_room_from_entry,
-        ).pack(side="left", padx=(0, 8))
-
-        ctk.CTkButton(
-            room_bar,
-            text="🚪 Quitter le salon",
-            width=150,
-            height=32,
-            fg_color=THEME["accent_danger"],
-            hover_color="#991B1B",
-            command=self._leave_room_action,
-        ).pack(side="left")
+        self._refresh_chat_display()
 
     def _on_chat_scope_change(self, value: str) -> None:
-    
         self._refresh_chat_display()
 
     def _visible_messages(self) -> list[dict[str, Any]]:
-        """Renvoie les messages à afficher selon l'onglet choisi."""
+        """Renvoie les messages à afficher selon la portée choisie."""
         if self.chat_scope_seg.get() == "Chat Global":
             return [m for m in self.chat_history if m["scope"] == "global"]
         return [
@@ -536,7 +425,6 @@ class HangmanApp:
         ]
 
     def _refresh_chat_display(self) -> None:
-        """Réaffiche l'ensemble des bulles de messages du chat."""
         for widget in self.chat_messages_frame.winfo_children():
             widget.destroy()
 
@@ -544,36 +432,20 @@ class HangmanApp:
             bubble = ctk.CTkFrame(self.chat_messages_frame, corner_radius=10, fg_color=THEME["bg_elevated"])
             bubble.pack(fill="x", padx=6, pady=3)
 
-            sender_color = THEME["accent_primary"]
             if msg["sender"] == "Système":
-                sender_color = THEME["accent_warning"]
+                color = THEME["accent_warning"]
             elif msg["sender"] == self.pseudo_var.get():
-                sender_color = THEME["accent_success"]
+                color = THEME["accent_success"]
+            else:
+                color = THEME["accent_primary"]
 
             head = ctk.CTkFrame(bubble, fg_color="transparent")
             head.pack(fill="x", padx=8, pady=(4, 0))
-
-            ctk.CTkLabel(
-                head,
-                text=msg["sender"],
-                font=ctk.CTkFont(size=11, weight="bold"),
-                text_color=sender_color,
-            ).pack(side="left")
-
-            ctk.CTkLabel(
-                head,
-                text=f"[{msg.get('time', '')}] • {("Salon" if msg["scope"] == "room" else "Global")}",
-                font=ctk.CTkFont(size=9),
-                text_color=THEME["text_muted"],
-            ).pack(side="right")
-
-            ctk.CTkLabel(
-                bubble,
-                text=msg["text"],
-                font=ctk.CTkFont(size=12),
-                text_color=THEME["text_primary"],
-                wraplength=760,
-                justify="left",
+            scope = "Salon" if msg["scope"] == "room" else "Global"
+            _label(head, msg["sender"], size=11, bold=True, color=color).pack(side="left")
+            _label(head, f"[{msg.get('time', '')}] • {scope}", size=9, color=THEME["text_muted"]).pack(side="right")
+            _label(
+                bubble, msg["text"], wraplength=760, justify="left",
             ).pack(anchor="w", padx=8, pady=(2, 6))
 
     def _add_chat_line(self, payload: dict) -> None:
@@ -582,194 +454,83 @@ class HangmanApp:
             "sender": payload.get("player", "?"),
             "text": payload.get("text", ""),
             "time": datetime.now().strftime("%H:%M:%S"),
-            "scope": payload.get("scope", "global"),     # "global" ou "room"
+            "scope": payload.get("scope", "global"),
             "room_id": payload.get("room_id"),
         })
         self._refresh_chat_display()
-    
+
     def _send_chat_message(self) -> None:
         text = self.chat_entry.get().strip()
         if not text:
             return
         scope = "room" if self.chat_scope_seg.get() == "Salon Courant" else "global"
-        try:
-            resp = self.controller.chat(text, scope)
-        except (ConnectionError, OSError) as e:
-            messagebox.showerror("Erreur réseau", str(e))
-            return
-        if resp.type == "ERROR":
-            messagebox.showwarning("Chat", resp.payload.get("message", "Message refusé."))
+        resp = self._checked(self.controller.chat, text, scope, title="Chat", default="Message refusé.")
+        if resp is None:
             return
         self.chat_entry.delete(0, "end")
-        self._add_chat_line(resp.payload)   # l'expéditeur ne reçoit pas son propre push
-
+        self._add_chat_line(resp.payload)  # l'expéditeur ne reçoit pas son propre push
 
     def _join_room_from_entry(self) -> None:
-            name = self.room_entry.get().strip()
-            if not name:
-                return
-            try:
-                resp = self.controller.join_room(name)
-            except (ConnectionError, OSError) as exc:
-                messagebox.showerror("Erreur réseau", str(exc))
-                return
-            if resp.type == "ERROR":
-                messagebox.showwarning("Salon", resp.payload.get("message", "Impossible de rejoindre le salon."))
-                return
-            self.current_room_id = resp.payload.get("room_id")
-            self.room_badge_var.set(f"🏠 Salon : {self.current_room_id}")
-            self.room_entry.delete(0, "end")
-            self._refresh_chat_display()
+        name = self.room_entry.get().strip()
+        if not name:
+            return
+        resp = self._checked(self.controller.join_room, name, title="Salon",
+                             default="Impossible de rejoindre le salon.")
+        if resp is None:
+            return
+        self.room_entry.delete(0, "end")
+        self._set_room(resp.payload.get("room_id"))
 
     def _leave_room_action(self) -> None:
-        try:
-            resp = self.controller.leave_room()
-        except (ConnectionError, OSError) as exc:
-            messagebox.showerror("Erreur réseau", str(exc))
-            return
-        if resp.type == "ERROR":
-            messagebox.showwarning("Salon", resp.payload.get("message", "Impossible de quitter le salon."))
-            return
-        self.current_room_id = None
-        self.room_badge_var.set("🏠 Salon : aucun")
+        resp = self._checked(self.controller.leave_room, title="Salon",
+                             default="Impossible de quitter le salon.")
+        if resp is not None:
+            self._set_room(None)
+
+    def _set_room(self, room_id: str | None) -> None:
+        self.current_room_id = room_id
+        self.room_badge_var.set(f"🏠 Salon : {room_id or 'aucun'}")
         self._refresh_chat_display()
-        
 
-    # --- ONGLET 4 : INSPECTEUR RÉSEAU ---
+    # --- ONGLET 3 : INSPECTEUR RÉSEAU ---
 
-    def _build_inspector_tab(self, parent: ctk.CTkFrame) -> None:
-        """Construit le visualiseur de trames TCP délimitées par \\n."""
+    def _build_inspector_tab(self, parent: Any) -> None:
         top = ctk.CTkFrame(parent, fg_color="transparent")
         top.pack(fill="x", padx=14, pady=(8, 4))
-
-        ctk.CTkLabel(
-            top,
-            text="🔍 Trames JSON TCP délimitées par \\n",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-
-        clear_btn = ctk.CTkButton(
-            top,
-            text="🗑 Effacer les logs",
-            width=120,
-            height=28,
-            font=ctk.CTkFont(size=11),
-            fg_color=THEME["bg_elevated"],
-            hover_color=THEME["bg_hover"],
-            text_color=THEME["text_primary"],
-            command=self._clear_logs,
+        _label(top, "🔍 Trames JSON TCP délimitées par \\n", size=14, bold=True).pack(side="left")
+        _packed(
+            _button(top, "🗑 Effacer les logs", self._clear_logs,
+                    THEME["bg_elevated"], THEME["bg_hover"], THEME["text_primary"],
+                    size=11, width=120, height=28),
+            side="right",
         )
-        clear_btn.pack(side="right")
 
-        self.log_text = ctk.CTkTextbox(
-            parent,
-            corner_radius=12,
-            font=ctk.CTkFont(family="Consolas", size=12),
-            wrap="word",
-        )
+        self.log_text = ctk.CTkTextbox(parent, corner_radius=12, font=_font(12, family="Consolas"), wrap="word")
         self.log_text.pack(fill="both", expand=True, padx=14, pady=(4, 10))
+        for tag, color in LOG_COLORS.items():
+            self.log_text.tag_config(tag, foreground=color)
 
-        # Configuration des tags de coloration syntaxique
-        self.log_text.tag_config("ENVOI", foreground="#38BDF8")
-        self.log_text.tag_config("REÇU", foreground="#00E676")
-        self.log_text.tag_config("CONNEXION", foreground="#A78BFA")
-        self.log_text.tag_config("RECONNEXION", foreground="#F59E0B")
-        self.log_text.tag_config("ERREUR", foreground="#FF5252")
-        self.log_text.tag_config("INFO", foreground="#94A3B8")
-
+    def _insert_log(self, direction: str, text: str) -> None:
+        tag = direction if direction in LOG_COLORS else None
+        self.log_text.insert("end", f"[{direction}] ", tag)
+        self.log_text.insert("end", f"{text}\n")
+        self.log_text.see("end")
 
     def _clear_logs(self) -> None:
-        """Efface les logs de la console."""
         self.log_text.delete("1.0", "end")
 
-    # --- DESSIN VECTORIEL DU PENDU & THÉMATISATION CANVAS ---
+    def log_network_event(self, direction: str, text: str) -> None:
+        """Point d'entrée pour les logs de GameClient (thread-safe via la file)."""
+        self._gui_queue.put(("LOG", (direction, text)))
 
-    def _toggle_appearance_mode(self) -> None:
-        """Alterne entre Mode Sombre et Mode Clair."""
-        current = ctk.get_appearance_mode().lower()
-        if current == "dark":
-            ctk.set_appearance_mode("light")
-            self.mode_switch.configure(text="Mode Clair")
-        else:
-            ctk.set_appearance_mode("dark")
-            self.mode_switch.configure(text="Mode Sombre")
-        self._redraw_current_canvas()
+    # --- POTENCE EN TEXTE ---
 
-    def _redraw_current_canvas(self) -> None:
-        """Redessine le canvas avec les couleurs adaptées au mode courant."""
-        is_dark = ctk.get_appearance_mode().lower() == "dark"
-        canvas_bg = "#14171F" if is_dark else "#FFFFFF"
-        self.canvas.config(bg=canvas_bg)
-        self.status_canvas.config(bg=canvas_bg)
-        self._draw_hangman_stage(self._current_errors, self._current_status)
-
-    def _draw_gallows(self) -> None:
-        """Dessine la structure épurée de la potence."""
-        self.canvas.delete("all")
-        is_dark = ctk.get_appearance_mode().lower() == "dark"
-        wood = "#475569" if is_dark else "#64748B"
-        base_decor = "#2D3748" if is_dark else "#CBD5E1"
-        rope = "#F59E0B" if is_dark else "#D97706"
-
-        # Base géométrique
-        self.canvas.create_line(30, 185, 230, 185, width=4, fill=wood, capstyle="round")
-        self.canvas.create_line(45, 185, 45, 191, width=3, fill=base_decor, capstyle="round")
-        self.canvas.create_line(215, 185, 215, 191, width=3, fill=base_decor, capstyle="round")
-
-        # Poteau vertical
-        self.canvas.create_line(70, 185, 70, 25, width=4, fill=wood, capstyle="round")
-
-        # Poutre horizontale
-        self.canvas.create_line(70, 25, 180, 25, width=4, fill=wood, capstyle="round")
-
-        # Étai diagonal
-        self.canvas.create_line(70, 60, 105, 25, width=3, fill=wood, capstyle="round")
-
-        # Corde
-        self.canvas.create_line(180, 25, 180, 55, width=2, fill=rope, capstyle="round")
-
-    def _draw_hangman_stage(self, errors_made: int, status: str | None = None) -> None:
-        """Dessine les parties du bonhomme pendu selon le nombre d'erreurs."""
-        self._current_errors = errors_made
-        self._current_status = status
-        self._draw_gallows()
-
-        is_dark = ctk.get_appearance_mode().lower() == "dark"
-        color = "#FF5252" if is_dark else "#DC2626"
-        fill_head = "#4A191F" if is_dark else "#FEE2E2"
-
-        if errors_made >= 1:
-            # Tête
-            self.canvas.create_oval(162, 55, 198, 91, width=3, outline=color, fill=fill_head)
-        if errors_made >= 2:
-            # Corps
-            self.canvas.create_line(180, 91, 180, 140, width=3, fill=color, capstyle="round")
-        if errors_made >= 3:
-            # Bras gauche
-            self.canvas.create_line(180, 104, 155, 124, width=3, fill=color, capstyle="round")
-        if errors_made >= 4:
-            # Bras droit
-            self.canvas.create_line(180, 104, 205, 124, width=3, fill=color, capstyle="round")
-        if errors_made >= 5:
-            # Jambe gauche
-            self.canvas.create_line(180, 140, 155, 175, width=3, fill=color, capstyle="round")
-        if errors_made >= 6:
-            # Jambe droite
-            self.canvas.create_line(180, 140, 205, 175, width=3, fill=color, capstyle="round")
-            # Yeux en croix (X X)
-            self.canvas.create_line(170, 68, 175, 73, width=2, fill=color)
-            self.canvas.create_line(175, 68, 170, 73, width=2, fill=color)
-            self.canvas.create_line(185, 68, 190, 73, width=2, fill=color)
-            self.canvas.create_line(190, 68, 185, 73, width=2, fill=color)
-
+    def _show_hangman(self, errors_made: int, status: str | None = None) -> None:
+        stage = min(errors_made, len(HANGMAN_STAGES) - 1)
+        text = HANGMAN_STAGES[stage]
         if status == "GAGNE":
-            crown = "#00E676" if is_dark else "#16A34A"
-            self.canvas.create_polygon(
-                166, 52, 173, 44, 180, 50, 187, 44, 194, 52,
-                fill=crown,
-                outline="",
-            )
+            text += "\n   Gagné !"
+        self.hangman_var.set(text)
 
     # --- MINUTERIE ---
 
@@ -805,7 +566,32 @@ class HangmanApp:
         self.timer_var.set(f"Temps : {formatted}")
         return formatted
 
-    # --- ASYNCHRONE & MULTITHREADING ---
+    # --- APPELS RÉSEAU ---
+
+    def _call(self, action: Callable[..., Message], *args: Any, title: str = "Erreur réseau") -> Message | None:
+        """Appelle le contrôleur. En cas de coupure, affiche l'erreur et renvoie None."""
+        try:
+            return action(*args)
+        except (ConnectionError, OSError) as exc:
+            self._set_status("Déconnecté", THEME["accent_danger"])
+            messagebox.showerror(title, str(exc))
+            return None
+
+    def _checked(
+        self,
+        action: Callable[..., Message],
+        *args: Any,
+        title: str,
+        default: str = "Requête refusée.",
+    ) -> Message | None:
+        """Comme _call, mais renvoie None aussi si le serveur répond ERROR (avec un avertissement)."""
+        resp = self._call(action, *args, title=title)
+        if resp is None:
+            return None
+        if resp.type == "ERROR":
+            messagebox.showwarning(title, resp.payload.get("message", default))
+            return None
+        return resp
 
     def _run_async(
         self,
@@ -814,7 +600,7 @@ class HangmanApp:
         on_success: Callable[[Any], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
     ) -> None:
-        """Exécute une opération réseau en arrière-plan sans bloquer CustomTkinter."""
+        """Exécute une opération en arrière-plan. Réservé à la découverte UDP."""
         if self._is_busy:
             return
         self._is_busy = True
@@ -836,11 +622,10 @@ class HangmanApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _release_busy(self) -> None:
-        """Réactive la possibilité d'émettre une action réseau."""
         self._is_busy = False
 
     def _process_gui_queue(self) -> None:
-        """Traite les retours réseau et logs sur le thread UI principal."""
+        """Traite les logs et les callbacks sur le thread principal de Tkinter."""
         try:
             while not self._gui_queue.empty():
                 msg_type, payload = self._gui_queue.get_nowait()
@@ -854,188 +639,169 @@ class HangmanApp:
                     title, msg = payload
                     messagebox.showerror(title, msg)
         finally:
-            if self.root:
-                self.root.after(30, self._process_gui_queue)
+            self.root.after(30, self._process_gui_queue)
 
     def _refresh(self) -> None:
+        """Relit le réseau sans bloquer, affiche les messages reçus, puis se reprogramme."""
         try:
             messages = self.controller.poll()
         except (ConnectionError, OSError):
             self.client.close()
-            self._set_status("Déconnecté", "#FF5252")
+            self._set_status("Déconnecté", THEME["accent_danger"])
             messages = []
         for m in messages:
             self._add_chat_line(m)
         self.root.after(200, self._refresh)
 
-    def log_network_event(self, direction: str, text: str) -> None:
-        """Point d'entrée thread-safe pour les logs de GameClient."""
-        self._gui_queue.put(("LOG", (direction, text)))
+    # --- AFFICHAGE : STATUT, FEEDBACK, CLAVIER ---
 
-    def _insert_log(self, direction: str, text: str) -> None:
-        """Insère une ligne colorée dans l'inspecteur réseau."""
-        tag = direction if direction in ("ENVOI", "REÇU", "CONNEXION", "RECONNEXION", "ERREUR", "INFO") else None
-        prefix = f"[{direction}] "
-        self.log_text.insert("end", prefix, tag)
-        self.log_text.insert("end", f"{text}\n")
-        self.log_text.see("end")
+    def _set_status(self, text: str, color: str) -> None:
+        self.status_canvas.itemconfig(self.status_circle, fill=color)
+        self.status_label.configure(text=text)
 
-    # --- ACTIONS RÉSEAU ET ÉTATS DU JEU ---
+    def _set_feedback(self, text: str, color: str | None = None) -> None:
+        self.feedback_var.set(text)
+        self.feedback_label.configure(text_color=color or THEME["text_secondary"])
 
-    def _bind_events(self) -> None:
-        """Associe les raccourcis clavier physiques et la fermeture de fenêtre."""
-        self.root.bind("<Key>", self._on_key_press)
-        self.host_entry.bind("<Return>", lambda _: self.connect_or_disconnect())
-        self.port_entry.bind("<Return>", lambda _: self.connect_or_disconnect())
-        self.pseudo_entry.bind("<Return>", lambda _: self.connect_or_disconnect())
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+    def _mark_connected(self) -> None:
+        self._set_status(f"Connecté à {self.client.host}:{self.client.port}", THEME["accent_success"])
+        self.connect_btn.configure(text="🔴 Déconnecter", fg_color=DANGER_BTN)
+        session_short = (self.client.session_id or "")[:8]
+        self.session_info_label.configure(
+            text=f"Session : {session_short}... | Joueur : {self.client.player_name}"
+        )
+
+    def _reset_connect_button(self) -> None:
+        self.connect_btn.configure(state="normal", text="🔌 Connexion", fg_color=THEME["accent_primary"])
+
+    def _reset_keyboard(self) -> None:
+        for btn in self.buttons.values():
+            btn.configure(state="normal", fg_color=THEME["bg_elevated"], text_color=THEME["text_primary"])
+
+    def _disable_key(self, letter: str, bg: str, fg: str) -> None:
+        self.buttons[letter].configure(state="disabled", fg_color=bg, text_color=fg)
+
+    def _disable_all_keys(self) -> None:
+        for btn in self.buttons.values():
+            btn.configure(state="disabled")
 
     def _on_key_press(self, event: tk.Event) -> None:
-        """Capture la saisie physique des lettres A-Z pour jouer instantanément."""
+        """Capture la saisie physique des lettres A-Z pour jouer."""
         focused = self.root.focus_get()
         if isinstance(focused, (tk.Entry, tk.Text)) or "entry" in str(focused).lower():
             return
-
         char = (event.char or "").upper()
         if char in self.buttons and self.buttons[char].cget("state") == "normal":
             self.play(char)
 
-    def _set_status(self, text: str, color: str) -> None:
-        """Met à jour l'indicateur LED et le libellé de statut."""
-        self.status_canvas.itemconfig(self.status_circle, fill=color)
-        self.status_label.configure(text=text)
-
-    def _set_feedback(self, text: str, color: tuple[str, str] | str | None = None) -> None:
-        """Met à jour le message d'aide / ambiance."""
-        self.feedback_var.set(text)
-        if color:
-            self.feedback_label.configure(text_color=color)
-        else:
-            self.feedback_label.configure(text_color=THEME["text_secondary"])
+    def _read_port(self) -> int | None:
+        try:
+            return int(self.port_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Port invalide", "Veuillez entrer un numéro de port valide (ex: 8888).")
+            return None
 
     def _check_saved_session(self) -> None:
-        """Vérifie si un fichier session.json peut être repris."""
-        if os.path.exists("session.json"):
-            has_session = self.client.load_session("session.json")
-            if has_session:
-                self.resume_btn.configure(state="normal", text_color=THEME["accent_primary"])
-                self.session_info_label.configure(
-                    text=f"Session détectée ({self.client.player_name})"
-                )
-                return
+        """Active le bouton de reprise si un session.json est disponible."""
+        if os.path.exists("session.json") and self.client.load_session("session.json"):
+            self.resume_btn.configure(state="normal", text_color=THEME["accent_primary"])
+            self.session_info_label.configure(text=f"Session détectée ({self.client.player_name})")
+            return
         self.resume_btn.configure(state="disabled", text_color=THEME["text_muted"])
 
+    # --- CONNEXION, REPRISE ---
+
     def connect_or_disconnect(self) -> None:
-        """Bascule entre Connexion et Déconnexion."""
         if self.client.is_connected():
             self.client.close()
-            self._set_status("Déconnecté", "#FF5252")
-            self.connect_btn.configure(text="🔌 Connexion", fg_color=THEME["accent_primary"])
+            self._set_status("Déconnecté", THEME["accent_danger"])
+            self._reset_connect_button()
             self._set_feedback("Connexion fermée.")
             return
 
         host = self.host_var.get().strip() or "127.0.0.1"
-        try:
-            port = int(self.port_var.get().strip())
-        except ValueError:
-            messagebox.showerror("Port invalide", "Veuillez entrer un numéro de port valide (ex: 8888).")
+        port = self._read_port()
+        if port is None:
             return
-
         pseudo = self.pseudo_var.get().strip() or "Joueur"
 
-        self._set_status("Connexion en cours...", "#F59E0B")
+        self._set_status("Connexion en cours...", THEME["accent_warning"])
         self.connect_btn.configure(state="disabled")
 
         try:
             welcome = self.controller.connect(host, port, pseudo)
         except (ConnectionError, OSError) as exc:
-            self.connect_btn.configure(state="normal", text="🔌 Connexion", fg_color=THEME["accent_primary"])
-            self._set_status("Échec connexion", "#FF5252")
+            self._reset_connect_button()
+            self._set_status("Échec connexion", THEME["accent_danger"])
             self._set_feedback(f"Erreur de connexion : {exc}", THEME["accent_danger"])
             messagebox.showerror("Connexion impossible", f"Impossible d'ouvrir la socket vers {host}:{port} :\n{exc}")
             return
 
         self.connect_btn.configure(state="normal")
-        if welcome.type == "WELCOME":
-            self._set_status(f"Connecté à {self.client.host}:{self.client.port}", "#00E676")
-            self.connect_btn.configure(text="🔴 Déconnecter", fg_color=("#DC2626", "#B91C1C"))
-            self.session_info_label.configure(
-                text=f"Session : {self.client.session_id[:8]}... | Joueur : {self.client.player_name}"
-            )
-            self.client.save_session("session.json")
-            self._check_saved_session()
-            self._set_feedback(f"Bienvenue {self.client.player_name} ! Lancement de la partie...", THEME["accent_success"])
-            self.start_new_game()
-        else:
-            self._set_status("Erreur session", "#FF5252")
+        if welcome.type != "WELCOME":
+            self._set_status("Erreur session", THEME["accent_danger"])
             messagebox.showerror("Erreur d'accueil", welcome.payload.get("message", "Échec HELLO"))
-
-
-
-    def resume_existing_session(self) -> None:
-        """Tente de reprendre la session stockée via RESUME."""
-        if not self.client.session_id:
-            if not self.client.load_session("session.json"):
-                messagebox.showinfo("Aucune session", "Aucune session enregistrée à reprendre.")
-                return
-
-        host = self.host_var.get().strip() or "127.0.0.1"
-        try:
-            port = int(self.port_var.get().strip())
-        except ValueError:
-            messagebox.showerror("Port invalide", "Veuillez entrer un numéro de port valide (ex: 8888).")
             return
 
-        self._set_status("Reprise de session...", "#F59E0B")
+        self._mark_connected()
+        self.client.save_session("session.json")
+        self._check_saved_session()
+        self._set_feedback(f"Bienvenue {self.client.player_name} ! Lancement de la partie...", THEME["accent_success"])
+        self.start_new_game()
+
+    def resume_existing_session(self) -> None:
+        if not self.client.session_id and not self.client.load_session("session.json"):
+            messagebox.showinfo("Aucune session", "Aucune session enregistrée à reprendre.")
+            return
+
+        host = self.host_var.get().strip() or "127.0.0.1"
+        port = self._read_port()
+        if port is None:
+            return
+
+        self._set_status("Reprise de session...", THEME["accent_warning"])
         try:
             resp = self.controller.resume(host, port)
         except (ConnectionError, OSError) as exc:
-            self._set_status("Déconnecté", "#FF5252")
+            self._set_status("Déconnecté", THEME["accent_danger"])
             messagebox.showwarning("Reprise impossible", f"Erreur de reprise : {exc}")
             return
 
         if resp.type != "STATE":
             messagebox.showwarning("Reprise impossible", resp.payload.get("message", "Session expirée"))
-            self._set_status("Session expirée", "#FF5252")
+            self._set_status("Session expirée", THEME["accent_danger"])
             return
 
-        self._set_status(f"Connecté à {self.client.host}:{self.client.port}", "#00E676")
-        self.connect_btn.configure(text="🔴 Déconnecter", fg_color=("#DC2626", "#B91C1C"))
-        self.session_info_label.configure(
-            text=f"Session : {self.client.session_id[:8]}... | Joueur : {self.client.player_name}"
-        )
+        self._mark_connected()
         self._set_feedback("Session restaurée avec succès !", THEME["accent_success"])
         if resp.payload.get("status") == "IDLE":
             self.start_new_game()
         else:
             self.update_from_state(resp)
 
+    # --- DÉCOUVERTE UDP ---
+
     def discover_local_servers(self) -> None:
-        """Sonde le réseau local en UDP Multicast pour trouver les serveurs actifs."""
-        self._set_status("Recherche de serveurs...", "#F59E0B")
-        self._set_feedback("Sondage UDP Multicast (IPv4 & IPv6) du réseau local en cours...")
+        self._set_status("Recherche de serveurs...", THEME["accent_warning"])
+        self._set_feedback("Sondage UDP du réseau local en cours...")
         self.discover_btn.configure(state="disabled", text="🔍 Recherche...")
 
-        def on_success(servers: list[dict[str, Any]]) -> None:
+        def finish() -> None:
             self.discover_btn.configure(state="normal", text="🔍 Découvrir")
+
+        def on_success(servers: list[dict[str, Any]]) -> None:
+            finish()
             if not servers:
-                self._set_status("Aucun serveur trouvé", "#94A3B8")
+                self._set_status("Aucun serveur trouvé", THEME["text_secondary"])
                 self._set_feedback("Aucun serveur de Pendu détecté sur le réseau local.")
                 messagebox.showinfo(
                     "Découverte réseau",
-                    "Aucun serveur de Pendu n'a répondu à la sonde UDP Multicast sur le réseau local.\n\n"
-                    "Vérifiez que le serveur est bien démarré sur la machine distante ou locale."
+                    "Aucun serveur de Pendu n'a répondu à la sonde UDP sur le réseau local.\n\n"
+                    "Vérifiez que le serveur est bien démarré sur la machine distante ou locale.",
                 )
-                return
-
-            if len(servers) == 1:
+            elif len(servers) == 1:
                 s = servers[0]
-                self.host_var.set(s["ip"])
-                self.port_var.set(str(s["port"]))
-                if s.get("use_tls"):
-                    self.tls_var.set(True)
-                self._set_status(f"Serveur détecté ({s['ip']})", "#00E676")
-                self._set_feedback(f"Serveur trouvé : {s['server_name']} sur {s['ip']}:{s['port']} !", THEME["accent_success"])
+                self._apply_server(s)
                 messagebox.showinfo(
                     "Serveur détecté",
                     f"Serveur trouvé avec succès !\n\n"
@@ -1043,31 +809,37 @@ class HangmanApp:
                     f"• Adresse : {s['ip']}:{s['port']}\n"
                     f"• Joueurs connectés : {s['players_count']}\n"
                     f"• Sécurité TLS : {'Oui 🔒' if s.get('use_tls') else 'Non'}\n\n"
-                    "Les champs Hôte et Port ont été pré-remplis automatiquement."
+                    "Les champs Hôte et Port ont été pré-remplis automatiquement.",
                 )
             else:
                 self._show_server_picker_dialog(servers)
 
         def on_error(exc: Exception) -> None:
-            self.discover_btn.configure(state="normal", text="🔍 Découvrir")
-            self._set_status("Erreur découverte", "#FF5252")
-            self._set_feedback(f"Échec sonde Multicast : {exc}", THEME["accent_danger"])
+            finish()
+            self._set_status("Erreur découverte", THEME["accent_danger"])
+            self._set_feedback(f"Échec de la sonde : {exc}", THEME["accent_danger"])
 
         self._run_async(lambda: discover_servers(timeout=1.2), on_success=on_success, on_error=on_error)
 
+    def _apply_server(self, s: dict[str, Any]) -> None:
+        """Remplit Hôte, Port et TLS avec un serveur découvert."""
+        self.host_var.set(s["ip"])
+        self.port_var.set(str(s["port"]))
+        if s.get("use_tls"):
+            self.tls_var.set(True)
+        self._set_status(f"Serveur sélectionné ({s['ip']})", THEME["accent_success"])
+        self._set_feedback(f"Serveur sélectionné : {s['server_name']} ({s['ip']}:{s['port']})", THEME["accent_success"])
+
     def _show_server_picker_dialog(self, servers: list[dict[str, Any]]) -> None:
-        """Affiche une boîte de dialogue pour choisir parmi plusieurs serveurs détectés."""
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Serveurs détectés sur le réseau")
         dialog.geometry("520x340")
         dialog.transient(self.root)
         dialog.grab_set()
 
-        ctk.CTkLabel(
-            dialog,
-            text=f"🌐 {len(servers)} serveurs de Pendu détectés :",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=THEME["accent_primary"],
+        _label(
+            dialog, f"🌐 {len(servers)} serveurs de Pendu détectés :",
+            size=14, bold=True, color=THEME["accent_primary"],
         ).pack(padx=16, pady=(16, 8), anchor="w")
 
         scroll = ctk.CTkScrollableFrame(dialog, height=200)
@@ -1077,113 +849,76 @@ class HangmanApp:
             card = ctk.CTkFrame(scroll, fg_color=THEME["bg_elevated"], corner_radius=8)
             card.pack(fill="x", pady=4, padx=4)
 
-            info_box = ctk.CTkFrame(card, fg_color="transparent")
-            info_box.pack(side="left", padx=10, pady=8)
-
-            ctk.CTkLabel(
-                info_box,
-                text=s["server_name"],
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color=THEME["text_primary"],
+            info = ctk.CTkFrame(card, fg_color="transparent")
+            info.pack(side="left", padx=10, pady=8)
+            _label(info, s["server_name"], bold=True).pack(anchor="w")
+            tls = " • TLS 🔒" if s.get("use_tls") else ""
+            _label(
+                info, f"{s['ip']}:{s['port']} • {s['players_count']} joueur(s){tls}",
+                size=11, color=THEME["text_secondary"],
             ).pack(anchor="w")
 
-            tls_info = " • TLS 🔒" if s.get("use_tls") else ""
-            ctk.CTkLabel(
-                info_box,
-                text=f"{s['ip']}:{s['port']} • {s['players_count']} joueur(s){tls_info}",
-                font=ctk.CTkFont(size=11),
-                text_color=THEME["text_secondary"],
-            ).pack(anchor="w")
-
-            def choose_srv(srv=s):
-                self.host_var.set(srv["ip"])
-                self.port_var.set(str(srv["port"]))
-                if srv.get("use_tls"):
-                    self.tls_var.set(True)
-                self._set_status(f"Serveur sélectionné ({srv['ip']})", "#00E676")
-                self._set_feedback(f"Serveur sélectionné : {srv['server_name']}", THEME["accent_success"])
+            def choose(srv: dict[str, Any] = s) -> None:
+                self._apply_server(srv)
                 dialog.destroy()
 
-            ctk.CTkButton(
-                card,
-                text="Sélectionner",
-                width=90,
-                height=28,
-                fg_color=THEME["accent_primary"],
-                hover_color="#0284C7",
-                command=choose_srv,
+            _button(
+                card, "Sélectionner", choose,
+                THEME["accent_primary"], "#0284C7", height=28, width=90,
             ).pack(side="right", padx=10, pady=8)
 
+    # --- PARTIE ---
+
     def start_new_game(self) -> None:
-        """Lance une nouvelle manche NEW_GAME."""
         if not self.client.is_connected() or not self.client.session_id:
             self.connect_or_disconnect()
             return
 
-        # Réinitialisation de l'affichage du clavier virtuel
-        for btn in self.buttons.values():
-            btn.configure(
-                state="normal",
-                fg_color=THEME["bg_elevated"],
-                text_color=THEME["text_primary"],
-            )
-
+        self._reset_keyboard()
         self._set_feedback("Démarrage d'une nouvelle manche...")
-        try:
-            resp = self.controller.new_game()
-        except (ConnectionError, OSError) as exc:
-            self._set_status("Déconnecté", "#FF5252")
-            messagebox.showerror("Erreur", f"Erreur réseau lors de NEW_GAME : {exc}")
+        resp = self._call(self.controller.new_game, title="Erreur")
+        if resp is None:
             return
         self.update_from_state(resp)
         self._set_feedback("Nouvelle manche commencée ! Choisissez une lettre.", THEME["accent_primary"])
 
     def play(self, letter: str) -> None:
-        letter_upper = letter.upper()
-        try:
-            resp = self.controller.guess(letter_upper)
-        except (ConnectionError, OSError) as exc:
-            self._set_status("Déconnecté", "#FF5252")
-            messagebox.showerror("Erreur Réseau", f"Échec de l'envoi de la lettre : {exc}")
+        letter = letter.upper()
+        resp = self._call(self.controller.guess, letter, title="Erreur Réseau")
+        if resp is None:
             return
-
-        if resp.type != "ERROR" and letter_upper in self.buttons:
-            self.buttons[letter_upper].configure(
-                state="disabled",
-                fg_color=THEME["bg_card"],
-                text_color=THEME["text_muted"],
-            )
+        # Une lettre refusée (ERROR) n'est pas grisée : update_from_state affiche l'erreur
+        if resp.type != "ERROR" and letter in self.buttons:
+            self._disable_key(letter, THEME["bg_card"], THEME["text_muted"])
         self.update_from_state(resp)
 
     def quit_game(self) -> None:
         if not messagebox.askyesno("Abandonner", "Voulez-vous vraiment abandonner la partie ?"):
             return
-        try:
-            self.controller.quit_game()
-        except (ConnectionError, OSError) as exc:
-            messagebox.showwarning("Attention", f"Erreur lors de QUIT : {exc}")
+        if self._call(self.controller.quit_game, title="Attention") is None:
             return
 
         self._stop_timer()
-        self._set_status("Session clôturée", "#94A3B8")
+        self._set_status("Session clôturée", THEME["text_secondary"])
         self.info_var.set("Session clôturée.")
         self.feedback_var.set("Partie abandonnée.")
-        self.current_room_id = None
-        self.room_badge_var.set("🏠 Salon : aucun")
-        for btn in self.buttons.values():
-            btn.configure(state="disabled")
+        self._set_room(None)
+        self._disable_all_keys()
 
     def simulate_disconnect(self) -> None:
-        """Ferme la socket locale pour démontrer la tolérance aux pannes (RESUME)."""
+        """Ferme la socket locale pour démontrer la reprise (RESUME)."""
         self.client.close()
-        self._set_status("Socket coupée (Simulation)", "#F59E0B")
-        self._set_feedback("Coupure simulée : cliquez sur une lettre pour tester le rejeu idempotent !", THEME["accent_warning"])
+        self._set_status("Socket coupée (Simulation)", THEME["accent_warning"])
+        self._set_feedback(
+            "Coupure simulée : cliquez sur une lettre pour tester le rejeu idempotent !",
+            THEME["accent_warning"],
+        )
         messagebox.showinfo(
             "Coupure simulée",
             "La socket TCP locale a été fermée.\n\n"
             "Cliquez sur une lettre ou une action :\n"
             "Le client détectera la coupure, se reconnectera automatiquement, "
-            "enverra RESUME et rejouera votre requête avec idempotence !"
+            "enverra RESUME et rejouera votre requête avec idempotence !",
         )
 
     def update_from_state(self, resp: Any) -> None:
@@ -1194,66 +929,53 @@ class HangmanApp:
 
         p = resp.payload
         max_errors = p.get("max_errors", 6)
-        raw_masked = p.get("masked_word", "")
-        spaced_word = "  ".join(raw_masked.split()) if " " in raw_masked else "  ".join(list(raw_masked))
-        self.word_var.set(spaced_word)
+        masked = p.get("masked_word", "")
+        self.word_var.set("  ".join(masked.replace(" ", "")))
 
         errors_left = p.get("errors_left", max_errors)
         errors_made = max(0, max_errors - errors_left)
-
         self.info_var.set(f"Essais restants : {errors_left} / {max_errors}  (Erreurs : {errors_made})")
         self.lives_var.set(f"❤️ {errors_left} / {max_errors}")
         self.errors_var.set(f"💀 {errors_made} / {max_errors}")
 
         status = p.get("status")
+        self._show_hangman(errors_made, status=status)
 
-        # Mise à jour graphique de la potence
-        self._draw_hangman_stage(errors_made, status=status)
+        for letter in p.get("used_letters", []):
+            key = letter.upper()
+            if key not in self.buttons:
+                continue
+            if key in masked:
+                self._disable_key(key, THEME["accent_success_bg"], THEME["accent_success"])
+            else:
+                self._disable_key(key, THEME["accent_danger_bg"], THEME["accent_danger"])
 
-        # Mise à jour des boutons du clavier virtuel
-        used = p.get("used_letters", [])
-        masked = p.get("masked_word", "")
-        for letter in used:
-            letter_upper = letter.upper()
-            if letter_upper in self.buttons:
-                if letter_upper in masked:
-                    self.buttons[letter_upper].configure(
-                        state="disabled",
-                        fg_color=THEME["accent_success_bg"],
-                        text_color=THEME["accent_success"],
-                    )
-                else:
-                    self.buttons[letter_upper].configure(
-                        state="disabled",
-                        fg_color=THEME["accent_danger_bg"],
-                        text_color=THEME["accent_danger"],
-                    )
-
-        # Gestion des états de jeu
         if status == "EN_COURS":
             if self._timer_started_at is None:
                 self._start_timer()
             self._set_feedback(f"Partie en cours. Erreurs : {errors_made}/{max_errors}")
-
         elif status in ("GAGNE", "PERDU", "ABANDONNE"):
-            elapsed = self._stop_timer()
-            for btn in self.buttons.values():
-                btn.configure(state="disabled")
+            self._end_game(p, status)
 
-            secret = p.get("secret_word")
-            msg = END_MESSAGES.get(status, f"Partie finie : {status}")
-            if elapsed is not None:
-                msg += f"\n\n⏱ Temps écoulé : {elapsed}"
-            if secret and status == "PERDU":
-                msg += f"\n\n📖 Le mot était : {secret}"
-                self._set_feedback(f"Défaite ! Le mot était {secret}.", THEME["accent_danger"])
-            elif status == "GAGNE":
-                self._set_feedback("Victoire ! Vous avez trouvé le mot !", THEME["accent_success"])
+    def _end_game(self, p: dict[str, Any], status: str) -> None:
+        elapsed = self._stop_timer()
+        self._disable_all_keys()
 
-            messagebox.showinfo("Fin de partie", msg)
+        secret = p.get("secret_word")
+        msg = END_MESSAGES.get(status, f"Partie finie : {status}")
+        if elapsed is not None:
+            msg += f"\n\n⏱ Temps écoulé : {elapsed}"
+        if status == "PERDU" and secret:
+            msg += f"\n\n📖 Le mot était : {secret}"
+            self._set_feedback(f"Défaite ! Le mot était {secret}.", THEME["accent_danger"])
+        elif status == "GAGNE":
+            self._set_feedback("Victoire ! Vous avez trouvé le mot !", THEME["accent_success"])
+
+        messagebox.showinfo("Fin de partie", msg)
+
+    # --- FERMETURE ---
 
     def _on_close(self) -> None:
-        """Ferme proprement la socket et détruit la fenêtre."""
         try:
             self.client.close()
         except Exception:

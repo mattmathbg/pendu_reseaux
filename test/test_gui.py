@@ -100,7 +100,6 @@ def no_modal_dialogs(monkeypatch):
 
 def test_gui_initialization(app_instance):
     assert len(app_instance.buttons) == 26
-    assert app_instance.canvas is not None
     assert app_instance.word_var.get() == "_ _ _ _ _"
     assert "6 / 6" in app_instance.info_var.get()
     assert app_instance.client is not None
@@ -150,10 +149,11 @@ def test_update_from_state_game_over(app_instance, monkeypatch):
         assert btn.cget("state") == "disabled"
 
 
-def test_draw_hangman_stages(app_instance):
-    for stage in range(7):
-        app_instance._draw_hangman_stage(stage)
-    app_instance._draw_hangman_stage(0, status="GAGNE")
+def test_hangman_text_stage(app_instance):
+    app_instance._show_hangman(0)
+    first = app_instance.hangman_var.get()
+    app_instance._show_hangman(6)
+    assert app_instance.hangman_var.get() != first
 
 
 def test_async_queue_and_logging(app_instance):
@@ -181,13 +181,6 @@ def test_key_press_handling(app_instance):
     mock_play.assert_called_once_with("K")
 
 
-def test_dark_light_mode_toggle(app_instance):
-    initial = ctk.get_appearance_mode().lower()
-    app_instance._toggle_appearance_mode()
-    toggled = ctk.get_appearance_mode().lower()
-    assert toggled != initial
-    app_instance._toggle_appearance_mode()
-    assert ctk.get_appearance_mode().lower() == initial
 
 
 def test_chat_tab_has_room_bar_and_filters(app_instance):
