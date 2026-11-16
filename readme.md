@@ -215,7 +215,17 @@ Victoire   Défaite               └───────────┤
 
 ## Lancer le serveur avec Docker
 
-Docker Compose permet de conteneuriser et d'exécuter le serveur asynchrone sur le réseau bridge `pendu_bridge` :
+### Option A : Depuis l'image officielle publiée (GitHub Container Registry)
+
+Idéal pour déployer instantanément sur un VPS ou un serveur distant sans cloner le dépôt :
+
+```sh
+docker run -d --name pendu_server -p 8888:8888 -p 8889:8889/udp --restart unless-stopped ghcr.io/mattmathbg/pendu_reseaux:latest
+```
+
+### Option B : Avec Docker Compose (développement local)
+
+Docker Compose permet de construire et d'exécuter le serveur asynchrone sur le réseau bridge `pendu_bridge` :
 
 1. Démarrer le serveur en arrière-plan :
 
