@@ -36,9 +36,10 @@ jobs:
         run: |
           pyinstaller --noconfirm --onefile --windowed `
             --name "Pendu" `
+            --paths "." `
             --collect-all customtkinter `
             --add-data "certs;certs" `
-            client/gui.py
+            run_client.py
 
       - name: Créer l'archive zip
         run: |
