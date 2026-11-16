@@ -27,8 +27,8 @@ class GameController:
     def guess(self, letter: str) -> Message:
         return self.client.guess(letter)
 
-    def new_game(self) -> Message:
-        return self.client.new_game()
+    def new_game(self, category_id: int | None = None) -> Message:
+        return self.client.new_game(category_id=category_id)
 
     def quit_game(self) -> Message:
         return self.client.quit_game()

@@ -95,7 +95,7 @@ class GameClient:
             self.auto_reconnect = True
         return resp
 
-    def new_game(self, player: str | None = None) -> Message:
+    def new_game(self, player: str | None = None, category_id: int | None = None) -> Message:
         """
         Démarre une nouvelle partie.
         Si un pseudo est fourni et qu'aucune session n'est active, initie HELLO d'abord.
@@ -104,7 +104,13 @@ class GameClient:
             hello_resp = self.hello(player)
             if hello_resp.type == "ERROR":
                 return hello_resp
-        return self.request("NEW_GAME")
+
+        payload = {}
+        if category_id is not None:
+                payload["category_id"] = category_id
+
+        return self.request("NEW_GAME", payload)
+    
 
     def guess(self, letter: str) -> Message:
         """Propose une lettre au serveur."""

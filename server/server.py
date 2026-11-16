@@ -18,11 +18,7 @@ from protocol.message import Message, ProtocolError
 from protocol.discovery import DiscoveryServer, DEFAULT_DISCOVERY_PORT
 from server.dispatcher import MessageDispatcher
 
-
-def mot_aleatoire() -> str:
-    """Retourne un mot aléatoire pour une manche."""
-    mots = ["PYTHON", "ASYNCHRONE", "SOCKET", "SERVEUR", "PROTOCOLE", "RESEAUX"]
-    return random.choice(mots)
+from core.words import get_word_from_api
 
 #---------------------------------------------------------------------
 # SSL/TLS
@@ -289,7 +285,10 @@ class Server:
         return response, session
 
     async def _handle_new_game(self, msg: Message, session: GameSession) -> Message:
-        secret = mot_aleatoire()
+        category_id = msg.payload.get("category_id")
+        secret, theme = get_word_from_api(category_id)
+        session.theme = theme
+
         if session.game is None or session.game.is_finished():
             session.game = Pendu(secret_word=secret, max_errors=6)
             custom_timeout = msg.payload.get("timeout")
@@ -371,6 +370,7 @@ class Server:
             "status": game.state.value,
             "max_errors": game.max_errors,
             "time_left": round(session.time_left(), 1),
+            "category": getattr(session, "theme", "DIVERS"),
         }
         if game.is_finished():
             payload["secret_word"] = game.secret_word

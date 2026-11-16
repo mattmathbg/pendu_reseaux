@@ -161,6 +161,37 @@ def _labeled_entry(parent: Any, label: str, var: tk.StringVar, width: int) -> ct
     entry.pack(side="left", padx=(0, 10))
     return entry
 
+CATEGORIES_MENU = {
+    "🎲 Aléatoire": None,
+    "1. L'école & l'instruction": 1,
+    "2. Paysages & climat": 2,
+    "3. Qualités & défauts": 3,
+    "4. Calcul & mesures": 4,
+    "5. Aliments & boissons": 5,
+    "6. Le corps humain": 6,
+    "7. Sens & volonté": 7,
+    "8. Intérieur & mobilier": 8,
+    "9. Industrie & travail": 9,
+    "10. Les arts": 10,
+    "11. L'agriculture": 11,
+    "12. Bois, chasse & pêche": 12,
+    "13. Gestes & mouvements": 13,
+    "14. Époque & saisons": 14,
+    "15. Vêtements & toilette": 15,
+    "16. Sports & jeux": 16,
+    "17. Maison & bâtiment": 17,
+    "18. Les voyages": 18,
+    "19. Les animaux": 19,
+    "20. Ville & univers": 20,
+    "21. Minéraux & végétaux": 21,
+    "22. Le commerce": 22,
+    "23. La communication": 23,
+    "24. Joies & peines": 24,
+    "25. Gouvernement & justice": 25,
+    "26. L'armée": 26,
+    "27. Vie & hygiène": 27,
+}
+
 
 class HangmanApp:
     def __init__(self, root: ctk.CTk | tk.Tk | None = None, client: GameClient | None = None) -> None:
@@ -333,6 +364,21 @@ class HangmanApp:
 
         actions = ctk.CTkFrame(parent, fg_color="transparent")
         actions.pack(pady=6)
+
+        self.category_var = ctk.StringVar(value="🎲 Aléatoire")
+        self.category_menu = ctk.CTkOptionMenu(
+            actions,
+            variable=self.category_var,
+            values=list(CATEGORIES_MENU.keys()),
+            width=200,
+            height=34,
+            fg_color=THEME["bg_elevated"],
+            button_color=THEME["border"],
+            button_hover_color=THEME["bg_hover"],
+            dropdown_font=ctk.CTkFont(size=11),
+        )
+        self.category_menu.pack(side="left", padx=6)
+
         self.new_game_btn = _packed(
             _button(actions, "✨ Nouvelle Manche", self.start_new_game,
                     THEME["accent_success"], "#15803D", "#052410", bold=True, height=34),
@@ -876,11 +922,15 @@ class HangmanApp:
 
         self._reset_keyboard()
         self._set_feedback("Démarrage d'une nouvelle manche...")
-        resp = self._call(self.controller.new_game, title="Erreur")
+        selected_label = self.category_var.get()
+        cat_id = CATEGORIES_MENU.get(selected_label)
+        resp = self._call(self.controller.new_game, category_id=cat_id, title="Erreur")
         if resp is None:
             return
         self.update_from_state(resp)
-        self._set_feedback("Nouvelle manche commencée ! Choisissez une lettre.", THEME["accent_primary"])
+        theme = resp.payload.get("category", "")
+        theme_msg = f" [Thème : {theme}]" if theme else ""
+        self._set_feedback(f"Nouvelle manche commencée{theme_msg} ! Choisissez une lettre.", THEME["accent_primary"])
 
     def play(self, letter: str) -> None:
         letter = letter.upper()
@@ -934,7 +984,9 @@ class HangmanApp:
 
         errors_left = p.get("errors_left", max_errors)
         errors_made = max(0, max_errors - errors_left)
-        self.info_var.set(f"Essais restants : {errors_left} / {max_errors}  (Erreurs : {errors_made})")
+        theme = p.get("category", "")
+        theme_str = f"  •  Thème : {theme}" if theme else ""
+        self.info_var.set(f"Essais restants : {errors_left} / {max_errors}  (Erreurs : {errors_made}){theme_str}")
         self.lives_var.set(f"❤️ {errors_left} / {max_errors}")
         self.errors_var.set(f"💀 {errors_made} / {max_errors}")
 
