@@ -14,8 +14,10 @@ class GameSession:
      game: Pendu | None
      is_connected: bool
      disconnect_timestamp: float | None
+     move_timeout: float
+     last_move_timestamp: float | None
      
-     def __init__(self, player_name: str) -> None:
+     def __init__(self, player_name: str, move_timeout: float = 60.0) -> None:
           self.session_id = str(uuid.uuid4())
           self.auth_token = str(uuid.uuid4())
           self.player_name = player_name
@@ -25,6 +27,8 @@ class GameSession:
           self.owner = None
           self.last_response = None
           self.room_id = None
+          self.move_timeout = move_timeout
+          self.last_move_timestamp = None
      
      def handle_disconnect(self) -> None:
           """
@@ -60,6 +64,25 @@ class GameSession:
                return True
           return (time.time() - self.disconnect_timestamp) > timeout
 
+     def reset_move_timer(self) -> None:
+          """Réinitialise le chronomètre pour le coup suivant."""
+          self.last_move_timestamp = time.time()
+
+     def is_timed_out(self) -> bool:
+          """Vérifie si le temps maximal alloué pour jouer a expiré."""
+          if self.last_move_timestamp is None:
+               return False
+          if self.game is None or self.game.is_finished():
+               return False
+          return (time.time() - self.last_move_timestamp) > self.move_timeout
+
+     def time_left(self) -> float:
+          """Renvoie le nombre de secondes restantes pour jouer le coup."""
+          if self.last_move_timestamp is None:
+               return self.move_timeout
+          elapsed = time.time() - self.last_move_timestamp
+          return max(0.0, self.move_timeout - elapsed)
+
 class SessionManager:
      sessions: dict[str, GameSession]
      timeout: float     
@@ -68,8 +91,8 @@ class SessionManager:
           self.timeout = timeout
           
           
-     def create_session(self, player_name: str) -> GameSession:
-          session = GameSession(player_name)
+     def create_session(self, player_name: str, move_timeout: float = 60.0) -> GameSession:
+          session = GameSession(player_name, move_timeout=move_timeout)
           self.sessions[session.session_id] = session
           return session
      

@@ -48,6 +48,7 @@ class Server:
         use_tls: bool = False,
         server_name: str = "Serveur Pendu M1",
         enable_discovery: bool = True,
+        move_timeout: float = 60.0,
     ) -> None:
         # Par défaut, écoute Dual-Stack en boucle locale (IPv4 et IPv6)
         if host is None:
@@ -60,6 +61,7 @@ class Server:
         self.use_tls = use_tls  # Indique si le serveur doit utiliser TLS/SSL
         self.server_name = server_name
         self.enable_discovery = enable_discovery
+        self.move_timeout = move_timeout
 
         # Service d'annonce Multicast UDP
         if self.enable_discovery:
@@ -231,7 +233,7 @@ class Server:
 
     async def _handle_hello(self, msg: Message) -> tuple[Message, GameSession]:
         player_name = msg.payload.get("player_name", "Anonyme")
-        session = self.sessions.create_session(player_name)
+        session = self.sessions.create_session(player_name, move_timeout=self.move_timeout)
         response = Message(
             type="WELCOME",
             request_id=msg.request_id,
@@ -273,7 +275,8 @@ class Server:
             ), None
 
 
-        # Reconnexion validée : on renvoie le STATE courant si une partie existe
+        # Reconnexion validée : on réinitialise le timer de coup et on renvoie l'état
+        session.reset_move_timer()
         if session.game:
             response = self._build_state_message(msg.request_id, session)
         else:
@@ -289,6 +292,10 @@ class Server:
         secret = mot_aleatoire()
         if session.game is None or session.game.is_finished():
             session.game = Pendu(secret_word=secret, max_errors=6)
+            custom_timeout = msg.payload.get("timeout")
+            if isinstance(custom_timeout, (int, float)) and custom_timeout > 0:
+                session.move_timeout = float(custom_timeout)
+            session.reset_move_timer()
         else:
             return Message(
                 type="ERROR",
@@ -310,9 +317,21 @@ class Server:
                 },
             )
 
+        if session.is_timed_out():
+            return Message(
+                type="ERROR",
+                request_id=msg.request_id,
+                session_id=session.session_id,
+                payload={
+                    "code": "TIMEOUT",
+                    "message": f"Délai maximal de réflexion dépassé ({session.move_timeout}s). Action expirée.",
+                },
+            )
+
         letter = msg.payload.get("letter", "")
         try:
             session.game.guess(letter)
+            session.reset_move_timer()
             return self._build_state_message(msg.request_id, session)
         except (InvalidLetterError, LetterAlreadyTriedError) as exc:
             return Message(
@@ -351,6 +370,7 @@ class Server:
             "used_letters": sorted(list(game.guessed_letters)),
             "status": game.state.value,
             "max_errors": game.max_errors,
+            "time_left": round(session.time_left(), 1),
         }
         if game.is_finished():
             payload["secret_word"] = game.secret_word
@@ -493,6 +513,7 @@ if __name__ == "__main__":
     parser.add_argument("--tls", action="store_true", help="Activer TLS/SSL pour les connexions sécurisées")
     parser.add_argument("--name", default="Serveur Pendu M1", help="Nom d'affichage du serveur pour la découverte réseau")
     parser.add_argument("--no-discovery", action="store_true", help="Désactiver l'annonce UDP Multicast")
+    parser.add_argument("--timeout", type=float, default=60.0, help="Durée maximale par coup en secondes (défaut : 60s)")
     args = parser.parse_args()
 
     srv = Server(
@@ -501,6 +522,7 @@ if __name__ == "__main__":
         use_tls=args.tls,
         server_name=args.name,
         enable_discovery=not args.no_discovery,
+        move_timeout=args.timeout,
     )
     try:
         asyncio.run(srv.start())
