@@ -314,58 +314,114 @@ class GameClient:
         return resp
 
     def _read_message(self) -> Message:
+        """
+        Lit le réseau jusqu'à recevoir la réponse à la requête en cours.
+
+        Les pushs (CHAT avec request_id 0) rencontrés en route sont rangés dans
+        `inbox` et ignorés : ils ne sont pas la réponse attendue.
+        Bloquant : utilisé uniquement par request() / retry_last().
+        """
         while True:
+            # 1. Un message complet est-il déjà dans le framer ?
             raw = self.framer.get_next_message()
             if raw is None:
+                # 2. Sinon, on attend de nouveaux octets sur la socket (bloquant)
                 chunk = self.sock.recv(4096)
                 if not chunk:
+                    # recv() renvoie b"" quand le serveur a fermé la connexion
                     raise ConnectionError("Le serveur a fermé la connexion")
                 self.framer.feed(chunk)
                 continue
+
+            # 3. Un message complet est disponible : on le désérialise et on le trie
             msg = Message.deserialize(raw)
             if self._store_if_push(msg):
-                continue         
-            return msg           
+                continue  # c'était un push : on le garde, on continue à lire
+            return msg  # c'est la réponse attendue
 
 
     def _store_if_push(self, msg: Message) -> bool:
+        """
+        Range le message dans `inbox` s'il s'agit d'un push du serveur.
+
+        Un push est un CHAT avec request_id == 0 : le serveur l'envoie aux autres
+        joueurs sans qu'ils l'aient demandé. Le compteur du client commence à 1,
+        donc aucune vraie réponse ne peut avoir 0 : ce numéro suffit à les distinguer.
+
+        Renvoie True si le message a été rangé (c'est un push), False sinon.
+        """
         if msg.type == "CHAT" and msg.request_id == 0:
             self.inbox.append(msg.payload)
             return True
         return False
 
+
     def poll(self) -> None:
+        """
+        Lit ce qui est déjà arrivé sur la socket, sans jamais attendre.
+
+        Appelée régulièrement par l'interface (toutes les 200 ms) pour afficher
+        les messages des autres joueurs, même quand le joueur ne fait rien.
+        Les messages reçus sont rangés dans `inbox` via _store_if_push.
+        """
         if self.sock is None:
             return
+
+        # Traite d'abord ce qui est déjà dans le framer (un message peut y être resté
+        # d'une lecture précédente, sans nouvelle donnée sur la socket)
         self._process_buffered()
+
         while True:
-            # En TLS, des octets déjà déchiffrés peuvent être en attente dans le tampon OpenSSL
+            # En TLS, OpenSSL peut avoir déjà déchiffré des octets que select() ne voit pas.
+            # pending() indique s'il en reste à lire.
             has_pending = hasattr(self.sock, "pending") and self.sock.pending() > 0
             if not has_pending:
+                # select avec délai 0 : demande au système si des données sont prêtes,
+                # sans attendre. Si rien n'est prêt, on sort immédiatement.
                 readable, _, _ = select.select([self.sock], [], [], 0)
                 if not readable:
                     break
+
+            # Des données sont disponibles : recv ne bloquera pas
             chunk = self.sock.recv(4096)
             if not chunk:
                 raise ConnectionError("Le serveur a fermé la connexion")
             self.framer.feed(chunk)
             self._process_buffered()
 
+
     def _process_buffered(self) -> None:
+        """
+        Extrait tous les messages complets du framer et les trie.
+
+        Un bloc reçu peut contenir plusieurs messages, ou seulement le début d'un
+        message : le framer ne rend que les messages complets, un par un.
+        Un message qui n'est pas un push, reçu hors requête, est signalé dans les logs.
+        """
         while True:
             raw = self.framer.get_next_message()
             if raw is None:
-                break
+                break  # plus de message complet : on attend la suite
             msg = Message.deserialize(raw)
             if not self._store_if_push(msg):
                 self._log("ERREUR", f"Réponse inattendue hors requête : {msg.type}")
 
+
     def chat(self, text: str, scope: str = "global") -> Message:
+        """
+        Envoie un message de chat.
+
+        scope : "global" (tous les joueurs) ou "room" (seulement le salon courant).
+        Renvoie la réponse du serveur (CHAT avec le request_id de cette requête).
+        """
         return self.request("CHAT", {"text": text, "scope": scope})
 
+
     def join_room(self, room: str) -> Message:
+        """Rejoint le salon `room`. Renvoie ROOM, ou ERROR si le nom est invalide."""
         return self.request("JOIN_ROOM", {"room": room})
 
+
     def leave_room(self) -> Message:
+        """Quitte le salon courant. Renvoie ROOM (room_id = None) ou ERROR."""
         return self.request("LEAVE_ROOM")
-            
