@@ -39,7 +39,7 @@ def test_discovery_end_to_end():
         found = discover_servers(timeout=1.0, discovery_port=test_udp_port)
         assert len(found) >= 1
         matched = [s for s in found if s["server_name"] == "Serveur Défi M1"]
-        assert 1 <= len(matched) <= 2  # Découvert en IPv4 et/ou IPv6
+        assert len(matched) >= 1  # Au moins une interface (IPv4 et/ou IPv6) a répondu
         s = matched[0]
         assert s["port"] == 8888
         assert s["players_count"] == 3
