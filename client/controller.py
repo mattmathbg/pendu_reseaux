@@ -33,9 +33,8 @@ class GameController:
     def quit_game(self) -> Message:
         return self.client.quit_game()
 
-    def connect(self, host: str, port: int, pseudo: str) -> Message:
-        """Ouvre la connexion puis fait HELLO. Renvoie la réponse (WELCOME ou ERROR)."""
-        self.client.host = host
+    def connect(self, endpoints: list[dict], port: int, pseudo: str) -> Message:
+        self.client.endpoints = endpoints
         self.client.port = port
         self.client.connect()
         return self.client.hello(pseudo)

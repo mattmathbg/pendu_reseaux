@@ -15,6 +15,18 @@ import ssl
 import sys
 from pathlib import Path
 
+
+
+def connect_to_server(endpoints: list[dict], port: int, timeout: float = 5.0) -> socket.socket:
+    """Essaie chaque point d'accès annoncé par le serveur, dans l'ordre."""
+    last_error: OSError | None = None
+    for ep in endpoints:
+        try:
+            return socket.create_connection((ep["host"], port), timeout=timeout)
+        except OSError as exc:
+            last_error = exc
+    raise ConnectionError(f"Aucun point d'accès joignable : {last_error}")
+
 def create_client_ssl_context(ca_cert_path: str = "certs/server.crt") -> ssl.SSLContext:
     target_path = Path(ca_cert_path)
     if not target_path.exists() and hasattr(sys, "_MEIPASS"):
@@ -54,38 +66,39 @@ class GameClient:
         self.log_callback: Callable[[str, str], None] | None = None
         self.use_tls: bool = use_tls  # Indique si la connexion doit utiliser TLS/SSL
         self.inbox: list[dict] = []
+        self.endpoints: list[dict] = [] 
 
     def _log(self, direction: str, text: str) -> None:
         if self.log_callback:
             self.log_callback(direction, text)
 
     def connect(self) -> None:
-        """Établit la connexion TCP (supporte nativement IPv4 et IPv6)."""
-        self.framer = StreamFramer()
-        try:
-            raw_sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
-        except OSError as e:
-            # Si la connexion vers l'IP réseau échoue depuis la même machine (ex: pare-feu Windows ou loopback),
-            # tentative de repli automatique sur la boucle locale 127.0.0.1
-            if self.host not in ("127.0.0.1", "localhost", "::1"):
+            """Établit la connexion TCP (IPv4 et IPv6), avec repli sur 127.0.0.1 et TLS optionnel."""
+            self.framer = StreamFramer()
+            try:
+                # Essaie les endpoints annoncés par le serveur, dans l'ordre
+                endpoints = self.endpoints or [{"host": self.host}]
+                raw_sock = connect_to_server(endpoints, self.port, self.timeout)
+            except OSError as e:
+                # Repli : si l'adresse réseau échoue (pare-feu, loopback), on tente 127.0.0.1
+                if self.host in ("127.0.0.1", "localhost", "::1"):
+                    raise
                 try:
                     raw_sock = socket.create_connection(("127.0.0.1", self.port), timeout=self.timeout)
-                    self._log("CONNEXION", f"Connexion directe à {self.host} échouée, repli automatique sur 127.0.0.1")
+                    self._log("CONNEXION", f"Connexion directe à {self.host} échouée, repli sur 127.0.0.1")
                     self.host = "127.0.0.1"
                 except OSError:
                     raise e
-            else:
-                raise e
 
-        if self.use_tls:
-            context = create_client_ssl_context()
-            # server_hostname doit correspondre au CN/SAN du certificat (localhost)
-            hostname = self.host if self.host not in ("127.0.0.1", "::1") else "localhost"
-            self.sock = context.wrap_socket(raw_sock, server_hostname=hostname)
-            self._log("CONNEXION", f"Connecté à {self.host}:{self.port} via TLS ({self.sock.version()})")
-        else:
-            self.sock = raw_sock
-            self._log("CONNEXION", f"Connecté à {self.host}:{self.port}")
+            if self.use_tls:
+                context = create_client_ssl_context()
+                # server_hostname doit correspondre au CN/SAN du certificat (localhost)
+                hostname = self.host if self.host not in ("127.0.0.1", "::1") else "localhost"
+                self.sock = context.wrap_socket(raw_sock, server_hostname=hostname)
+                self._log("CONNEXION", f"Connecté à {self.host}:{self.port} via TLS ({self.sock.version()})")
+            else:
+                self.sock = raw_sock
+                self._log("CONNEXION", f"Connecté à {self.host}:{self.port}")
 
     def close(self) -> None:
         """Ferme la socket TCP proprement."""
@@ -425,3 +438,5 @@ class GameClient:
     def leave_room(self) -> Message:
         """Quitte le salon courant. Renvoie ROOM (room_id = None) ou ERROR."""
         return self.request("LEAVE_ROOM")
+
+    

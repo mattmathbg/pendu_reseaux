@@ -55,6 +55,7 @@ class DiscoveryServer:
         self._running = False
         self._thread: threading.Thread | None = None
         self._sockets: list[socket.socket] = []
+        self.endpoints: list[dict] = []
 
     def start(self) -> None:
         """Démarre le répondeur de découverte dans un thread daemon."""
@@ -63,6 +64,10 @@ class DiscoveryServer:
 
         self._running = True
         self._sockets = self._create_listener_sockets()
+        self.endpoints = [
+            {"family": "IPv4", "host": "127.0.0.1"},
+            {"family": "IPv6", "host": "::1"},
+        ]
         self._thread = threading.Thread(target=self._run_loop, name="DiscoveryServer", daemon=True)
         self._thread.start()
         logger.info(f"[DISCOVERY] Répondeur démarré sur le port UDP {self.discovery_port}")
@@ -151,6 +156,7 @@ class DiscoveryServer:
             "tcp_port": self.tcp_port,
             "players_count": self.get_players_count(),
             "use_tls": self.use_tls,
+            "endpoints": self.endpoints,
         }
         raw_offer = json.dumps(offer).encode("utf-8")
         print(f"[DISCOVERY] Sonde reçue de {sender_addr}, envoi offre ({self.server_name}:{self.tcp_port})...")
@@ -266,41 +272,32 @@ def discover_servers(
                 try:
                     data, addr = sock.recvfrom(2048)
                     raw_ip = addr[0]
-                    # Nettoyage de l'éventuel identifiant de zone scope IPv6 (ex: fe80::1%12 -> fe80::1)
-                    clean_ip = raw_ip.split("%")[0]
-
+        
                     resp = json.loads(data.decode("utf-8"))
                     if isinstance(resp, dict) and resp.get("type") == "OFFER":
-                        tcp_port = int(resp.get("tcp_port", 8888))
-                        server_name = str(resp.get("server_name", "Serveur Pendu"))
-                        players = int(resp.get("players_count", 0))
-                        use_tls = bool(resp.get("use_tls", False))
-                        # Identifiant du serveur : même serveur = même clé, quelle que soit l'adresse
-                        server_id = str(resp.get("server_id", f"{clean_ip}:{tcp_port}"))
-
-                        if server_id not in discovered:
+                        server_id = str(resp.get("server_id", ""))
+                        if server_id and server_id not in discovered:
+                            tcp_port = int(resp.get("tcp_port", 8888))
+                            server_name = str(resp.get("server_name", "Serveur Pendu"))
+                            players = int(resp.get("players_count", 0))
+                            use_tls = bool(resp.get("use_tls", False))
+                            endpoints = resp.get("endpoints", [])
                             tls_badge = " [TLS 🔒]" if use_tls else ""
-                            display_str = f"{server_name}{tls_badge} — {clean_ip}:{tcp_port} ({players} joueur{'s' if players > 1 else ''})"
                             discovered[server_id] = {
-                                "ip": clean_ip,
+                                "endpoints": endpoints,
                                 "port": tcp_port,
                                 "server_name": server_name,
                                 "players_count": players,
                                 "use_tls": use_tls,
-                                "display": display_str,
+                                "display": f"{server_name}{tls_badge} — {players} joueur{'s' if players > 1 else ''}",
                             }
-                        elif ":" in discovered[server_id]["ip"] and ":" not in clean_ip:
-                            # Préférer l'adresse IPv4 routable à l'adresse IPv6 Link-Local sous Windows
-                            discovered[server_id]["ip"] = clean_ip
-                            tls_badge = " [TLS 🔒]" if use_tls else ""
-                            discovered[server_id]["display"] = f"{server_name}{tls_badge} — {clean_ip}:{tcp_port} ({players} joueur{'s' if players > 1 else ''})"
                 except (UnicodeDecodeError, json.JSONDecodeError, ValueError, OSError):
                     continue
     finally:
         for sock in sockets:
-            try:
-                sock.close()
-            except OSError:
-                pass
+         try:
+            sock.close()
+         except OSError:
+            pass
 
     return list(discovered.values())

@@ -88,57 +88,56 @@ class HangmanApp:
     # --- INTERFACE ---
 
     def _build_ui(self) -> None:
-        # Connexion
-        top = _w(ctk.CTkFrame, self.root, {"fill": "x", "padx": 8, "pady": 6}, fg_color="transparent")
-        for label, var, width in (("Hôte", self.host_var, 120), ("Port", self.port_var, 60),
-                                  ("Pseudo", self.pseudo_var, 100)):
-            _w(ctk.CTkLabel, top, text=label)
-            _w(ctk.CTkEntry, top, textvariable=var, width=width).bind("<Return>", lambda _: self.connect_or_disconnect())
-        self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
-        self.resume_btn = _w(ctk.CTkButton, top, text="Reprendre", width=90, command=self.resume_existing_session)
-        self.discover_btn = _w(ctk.CTkButton, top, text="Découvrir", width=90, command=self.discover_local_servers)
-        _w(ctk.CTkLabel, top, {"side": "right"}, textvariable=self.room_var)
-        self.session_info_label = _w(ctk.CTkLabel, self.root, {"anchor": "w", "padx": 10}, text="Déconnecté")
+            # Connexion
+            top = _w(ctk.CTkFrame, self.root, {"fill": "x", "padx": 8, "pady": 6}, fg_color="transparent")
+            for label, var, width in (("Port", self.port_var, 60), ("Pseudo", self.pseudo_var, 100)):
+                _w(ctk.CTkLabel, top, text=label)
+                _w(ctk.CTkEntry, top, textvariable=var, width=width).bind("<Return>", lambda _: self.connect_or_disconnect())
+            self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
+            self.resume_btn = _w(ctk.CTkButton, top, text="Reprendre", width=90, command=self.resume_existing_session)
+            self.discover_btn = _w(ctk.CTkButton, top, text="Découvrir", width=90, command=self.discover_local_servers)
+            _w(ctk.CTkLabel, top, {"side": "right"}, textvariable=self.room_var)
+            self.session_info_label = _w(ctk.CTkLabel, self.root, {"anchor": "w", "padx": 10}, text="Déconnecté")
 
-        self.tabview = _w(ctk.CTkTabview, self.root, {"fill": "both", "expand": True, "padx": 8, "pady": 4})
-        game, chat, log = (self.tabview.add(name) for name in ("Jeu", "Chat", "Réseau"))
+            self.tabview = _w(ctk.CTkTabview, self.root, {"fill": "both", "expand": True, "padx": 8, "pady": 4})
+            game, chat, log = (self.tabview.add(name) for name in ("Jeu", "Chat", "Réseau"))
 
-        # Onglet Jeu
-        _w(ctk.CTkLabel, game, {"pady": 4}, textvariable=self.hangman_var, font=(MONO, 14), justify="left")
-        _w(ctk.CTkLabel, game, {}, textvariable=self.word_var, font=(MONO, 32, "bold"))
-        stats = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
-        for var in (self.timer_var, self.lives_var, self.errors_var):
-            _w(ctk.CTkLabel, stats, {"side": "left", "padx": 10}, textvariable=var)
-        _w(ctk.CTkLabel, game, {}, textvariable=self.info_var)
-        keys = _w(ctk.CTkFrame, game, {"pady": 6}, fg_color="transparent")
-        self.buttons: dict[str, ctk.CTkButton] = {}
-        for i, letter in enumerate(ascii_uppercase):
-            self.buttons[letter] = ctk.CTkButton(keys, text=letter, width=40, command=lambda l=letter: self.play(l))
-            self.buttons[letter].grid(row=i // 9, column=i % 9, padx=2, pady=2)
-        actions = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
-        for text, command in (("Nouvelle manche", self.start_new_game), ("Abandonner", self.quit_game),
-                              ("Coupure simulée", self.simulate_disconnect)):
-            _w(ctk.CTkButton, actions, text=text, command=command)
+            # Onglet Jeu
+            _w(ctk.CTkLabel, game, {"pady": 4}, textvariable=self.hangman_var, font=(MONO, 14), justify="left")
+            _w(ctk.CTkLabel, game, {}, textvariable=self.word_var, font=(MONO, 32, "bold"))
+            stats = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
+            for var in (self.timer_var, self.lives_var, self.errors_var):
+                _w(ctk.CTkLabel, stats, {"side": "left", "padx": 10}, textvariable=var)
+            _w(ctk.CTkLabel, game, {}, textvariable=self.info_var)
+            keys = _w(ctk.CTkFrame, game, {"pady": 6}, fg_color="transparent")
+            self.buttons: dict[str, ctk.CTkButton] = {}
+            for i, letter in enumerate(ascii_uppercase):
+                self.buttons[letter] = ctk.CTkButton(keys, text=letter, width=40, command=lambda l=letter: self.play(l))
+                self.buttons[letter].grid(row=i // 9, column=i % 9, padx=2, pady=2)
+            actions = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
+            for text, command in (("Nouvelle manche", self.start_new_game), ("Abandonner", self.quit_game),
+                                ("Coupure simulée", self.simulate_disconnect)):
+                _w(ctk.CTkButton, actions, text=text, command=command)
 
-        # Onglet Chat
-        self.chat_scope_seg = _w(ctk.CTkSegmentedButton, chat, {"anchor": "e"},
-                                 values=["Salon Courant", "Chat Global"],
-                                 command=lambda _: self._refresh_chat_display())
-        self.chat_scope_seg.set("Salon Courant")
-        self.chat_box = _w(ctk.CTkTextbox, chat, {"fill": "both", "expand": True, "pady": 4}, state="disabled")
-        send_row = _w(ctk.CTkFrame, chat, {"fill": "x"}, fg_color="transparent")
-        self.chat_entry = _w(ctk.CTkEntry, send_row, {"side": "left", "fill": "x", "expand": True},
-                             placeholder_text="Votre message...")
-        self.chat_entry.bind("<Return>", lambda _: self._send_chat_message())
-        _w(ctk.CTkButton, send_row, text="Envoyer", width=80, command=self._send_chat_message)
-        room_row = _w(ctk.CTkFrame, chat, {"fill": "x", "pady": 4}, fg_color="transparent")
-        self.room_entry = _w(ctk.CTkEntry, room_row, width=240, placeholder_text="Nom du salon (1 à 20 caractères)")
-        _w(ctk.CTkButton, room_row, text="Rejoindre", width=90, command=self._join_room_from_entry)
-        _w(ctk.CTkButton, room_row, text="Quitter le salon", width=120, command=self._leave_room_action)
+            # Onglet Chat
+            self.chat_scope_seg = _w(ctk.CTkSegmentedButton, chat, {"anchor": "e"},
+                                    values=["Salon Courant", "Chat Global"],
+                                    command=lambda _: self._refresh_chat_display())
+            self.chat_scope_seg.set("Salon Courant")
+            self.chat_box = _w(ctk.CTkTextbox, chat, {"fill": "both", "expand": True, "pady": 4}, state="disabled")
+            send_row = _w(ctk.CTkFrame, chat, {"fill": "x"}, fg_color="transparent")
+            self.chat_entry = _w(ctk.CTkEntry, send_row, {"side": "left", "fill": "x", "expand": True},
+                                placeholder_text="Votre message...")
+            self.chat_entry.bind("<Return>", lambda _: self._send_chat_message())
+            _w(ctk.CTkButton, send_row, text="Envoyer", width=80, command=self._send_chat_message)
+            room_row = _w(ctk.CTkFrame, chat, {"fill": "x", "pady": 4}, fg_color="transparent")
+            self.room_entry = _w(ctk.CTkEntry, room_row, width=240, placeholder_text="Nom du salon (1 à 20 caractères)")
+            _w(ctk.CTkButton, room_row, text="Rejoindre", width=90, command=self._join_room_from_entry)
+            _w(ctk.CTkButton, room_row, text="Quitter le salon", width=120, command=self._leave_room_action)
 
-        # Onglet Réseau (inspecteur de trames)
-        _w(ctk.CTkButton, log, {"anchor": "e"}, text="Effacer", width=80, command=self._clear_logs)
-        self.log_text = _w(ctk.CTkTextbox, log, {"fill": "both", "expand": True}, font=(MONO, 12))
+            # Onglet Réseau (inspecteur de trames)
+            _w(ctk.CTkButton, log, {"anchor": "e"}, text="Effacer", width=80, command=self._clear_logs)
+            self.log_text = _w(ctk.CTkTextbox, log, {"fill": "both", "expand": True}, font=(MONO, 12))
 
     # --- STATUT, SESSION ---
 
@@ -176,6 +175,13 @@ class HangmanApp:
             return None
         return resp
 
+    def _read_port(self) -> int | None:
+        try:
+            return int(self.port_var.get())
+        except ValueError:
+            messagebox.showerror("Port invalide", "Entrez un numéro de port valide (ex : 8888).")
+            return None
+
     # --- CONNEXION, REPRISE, DÉCOUVERTE ---
 
     def connect_or_disconnect(self) -> None:
@@ -187,11 +193,12 @@ class HangmanApp:
             self._login()
 
     def _login(self) -> None:
-        target = self._target()
-        if target is None:
+        port = self._read_port()
+        if port is None:
             return
         pseudo = self.pseudo_var.get().strip() or "Joueur"
-        if self._do(self.controller.connect, *target, pseudo, title="Connexion impossible") is None:
+        endpoints = getattr(self, "selected_endpoints", None) or [{"host": "127.0.0.1"}]
+        if self._do(self.controller.connect, endpoints, port, pseudo, title="Connexion impossible") is None:
             return
         self._mark_connected()
         self.client.save_session("session.json")
@@ -199,13 +206,14 @@ class HangmanApp:
         self.start_new_game()
 
     def resume_existing_session(self) -> None:
-        target = self._target()
-        if target is None:
+        port = self._read_port()
+        if port is None:
             return
         if not self.client.session_id and not self.client.load_session("session.json"):
             messagebox.showinfo("Aucune session", "Aucune session enregistrée à reprendre.")
             return
-        resp = self._do(self.controller.resume, *target, title="Reprise impossible")
+        endpoints = getattr(self, "selected_endpoints", None) or [{"host": "127.0.0.1"}]
+        resp = self._do(self.controller.resume, endpoints, port, title="Reprise impossible")
         if resp is None:
             return
         self._mark_connected()
@@ -243,7 +251,7 @@ class HangmanApp:
                               command=lambda s=s: (self._apply_server(s), dialog.destroy())).pack(padx=10, pady=4)
 
     def _apply_server(self, s: dict) -> None:
-        self.host_var.set(s["ip"])
+        self.selected_endpoints = s["endpoints"]
         self.port_var.set(str(s["port"]))
         self.info_var.set(f"Serveur sélectionné : {s['display']}")
 
