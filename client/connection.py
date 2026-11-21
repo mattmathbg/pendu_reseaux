@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import select 
+import time 
 from typing import Callable
 from protocol.framing import StreamFramer
 from protocol.message import Message
@@ -14,7 +15,7 @@ from protocol.message import Message
 import ssl
 import sys
 from pathlib import Path
-
+SESSION_TTL = 60  
 
 
 def connect_to_server(endpoints: list[dict], port: int, timeout: float = 5.0) -> socket.socket:
@@ -164,38 +165,47 @@ class GameClient:
         return resp
 
     def quit_game(self) -> Message:
-        """Quitte la partie et détruit la session sur le serveur."""
+        """Quitte la partie : supprime la session côté serveur et retire l'entrée du fichier."""
         resp = self.request("QUIT")
-        filepath = "session.json"
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                sessions = data.get("sessions", {}) if isinstance(data, dict) else {}
-                if self.player_name in sessions:
-                    del sessions[self.player_name]
-
-                # S'il reste d'autres sessions enregistrées d'autres joueurs
-                if sessions:
-                    next_player, next_data = next(iter(sessions.items()))
-                    data["player_name"] = next_player
-                    data["session_id"] = next_data.get("session_id")
-                    data["auth_token"] = next_data.get("auth_token")
-                    data["sessions"] = sessions
-                    with open(filepath, "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=2)
-                else:
-                    os.remove(filepath)
-            except Exception:
-                try:
-                    os.remove(filepath)
-                except OSError:
-                    pass
-
+        self.forget_session()         
         self.session_id = None
         self.auth_token = None
         self.auto_reconnect = False
         return resp
+
+    def forget_session(self, filepath: str = "session.json") -> None:
+            """Retire l'entrée du joueur courant. Supprime le fichier s'il ne reste rien."""
+            if not os.path.exists(filepath) or not self.player_name:
+                return
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            sessions = data.get("sessions", {})
+            sessions.pop(self.player_name, None)
+            if not sessions:
+                os.remove(filepath)
+                return
+            data["sessions"] = sessions
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+    def prune_sessions_file(self, filepath: str = "session.json") -> None:
+        """Supprime du fichier les sessions que le serveur a déjà oubliées (plus de 60 s)."""
+        if not os.path.exists(filepath):
+            return
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        now = time.time()
+        sessions = {
+            name: entry
+            for name, entry in data.get("sessions", {}).items()
+            if now - entry.get("last_seen", 0) <= SESSION_TTL
+        }
+        if not sessions:
+            os.remove(filepath)
+            return
+        data["sessions"] = sessions
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
 
     def save_session(self, filepath: str = "session.json") -> None:
         """Sauvegarde les jetons de session dans un fichier JSON pour reprise ultérieure.
@@ -212,10 +222,19 @@ class GameClient:
                 sessions = {}
 
         if self.player_name and self.session_id:
-            sessions[self.player_name] = {
-                "session_id": self.session_id,
-                "auth_token": self.auth_token,
+            now = time.time()
+            sessions = {
+                name: entry
+                for name, entry in sessions.items()
+                if now - entry.get("last_seen", 0) <= SESSION_TTL
             }
+
+            if self.player_name and self.session_id:
+                sessions[self.player_name] = {
+                    "session_id": self.session_id,
+                    "auth_token": self.auth_token,
+                    "last_seen": now,
+                }
 
         data = {
             "player_name": self.player_name,
@@ -438,5 +457,8 @@ class GameClient:
     def leave_room(self) -> Message:
         """Quitte le salon courant. Renvoie ROOM (room_id = None) ou ERROR."""
         return self.request("LEAVE_ROOM")
+
+
+    
 
     

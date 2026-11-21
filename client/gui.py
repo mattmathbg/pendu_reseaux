@@ -150,6 +150,7 @@ class HangmanApp:
         self._status(f"Connecté à {c.host}:{c.port} | Session : {(c.session_id or '')[:8]}... | Joueur : {c.player_name}")
 
     def _check_saved_session(self) -> None:
+        self.client.prune_sessions_file()   # supprime les entrées périmées
         found = os.path.exists("session.json") and self.client.load_session("session.json")
         self.resume_btn.configure(state="normal" if found else "disabled")
         if found:
@@ -451,6 +452,8 @@ class HangmanApp:
         self.root.after(200, self._refresh)
 
     def _on_close(self) -> None:
+        if self.client.is_connected() and self.client.player_name and self.client.session_id:
+            self.client.save_session("session.json")   # met à jour last_seen
         self.client.close()
         self.root.destroy()
 
