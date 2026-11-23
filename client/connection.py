@@ -174,102 +174,56 @@ class GameClient:
         return resp
 
     def forget_session(self, filepath: str = "session.json") -> None:
-            """Retire l'entrée du joueur courant. Supprime le fichier s'il ne reste rien."""
-            if not os.path.exists(filepath) or not self.player_name:
-                return
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            sessions = data.get("sessions", {})
-            sessions.pop(self.player_name, None)
-            if not sessions:
-                os.remove(filepath)
-                return
-            data["sessions"] = sessions
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+        """Retire l'entrée du joueur courant."""
+        sessions = self._read_sessions(filepath)
+        sessions.pop(self.player_name, None)
+        self._write_sessions(sessions, filepath)
 
-    def prune_sessions_file(self, filepath: str = "session.json") -> None:
-        """Supprime du fichier les sessions que le serveur a déjà oubliées (plus de 60 s)."""
+
+    def _read_sessions(self, filepath: str = "session.json") -> dict:
         if not os.path.exists(filepath):
-            return
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        now = time.time()
-        sessions = {
-            name: entry
-            for name, entry in data.get("sessions", {}).items()
-            if now - entry.get("last_seen", 0) <= SESSION_TTL
-        }
-        if not sessions:
-            os.remove(filepath)
-            return
-        data["sessions"] = sessions
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-
-    def save_session(self, filepath: str = "session.json") -> None:
-        """Sauvegarde les jetons de session dans un fichier JSON pour reprise ultérieure.
-        Préserve les sessions des autres joueurs pour éviter l'écrasement mutuel.
-        """
-        sessions = {}
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    old_data = json.load(f)
-                    if isinstance(old_data, dict):
-                        sessions = old_data.get("sessions", {})
-            except Exception:
-                sessions = {}
-
-        if self.player_name and self.session_id:
-            now = time.time()
-            sessions = {
-                name: entry
-                for name, entry in sessions.items()
-                if now - entry.get("last_seen", 0) <= SESSION_TTL
-            }
-
-            if self.player_name and self.session_id:
-                sessions[self.player_name] = {
-                    "session_id": self.session_id,
-                    "auth_token": self.auth_token,
-                    "last_seen": now,
-                }
-
-        data = {
-            "player_name": self.player_name,
-            "session_id": self.session_id,
-            "auth_token": self.auth_token,
-            "sessions": sessions,
-        }
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        self._log("INFO", f"Session enregistrée dans {filepath} pour {self.player_name}")
-
-    def load_session(self, filepath: str = "session.json") -> bool:
-        """Charge les jetons d'une session sauvegardée."""
-        if not os.path.exists(filepath):
-            return False
+            return {}
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            sessions = data.get("sessions", {}) if isinstance(data, dict) else {}
-            # Priorité à la session du joueur actif s'il existe dans le dictionnaire multi-sessions
-            if self.player_name in sessions:
-                p_data = sessions[self.player_name]
-                self.session_id = p_data.get("session_id")
-                self.auth_token = p_data.get("auth_token")
-            else:
-                self.player_name = data.get("player_name", self.player_name)
-                self.session_id = data.get("session_id")
-                self.auth_token = data.get("auth_token")
-
-            loaded = bool(self.session_id and self.auth_token)
-            if loaded:
-                self._log("INFO", f"Session chargée depuis {filepath} (Joueur: {self.player_name}, ID: {self.session_id})")
-            return loaded
+            return data if isinstance(data, dict) else {}
         except Exception:
+            return {}
+
+    def _write_sessions(self, sessions: dict, filepath: str = "session.json") -> None:
+        if not sessions:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, indent=2)
+
+    def save_session(self, filepath: str = "session.json") -> None:
+        """Enregistre la session du joueur courant dans la liste indexée par pseudo."""
+        sessions = self._read_sessions(filepath)
+        now = time.time()
+        sessions = {n: e for n, e in sessions.items() if now - e.get("last_seen", 0) <= SESSION_TTL}
+        if self.player_name and self.session_id:
+            sessions[self.player_name] = {
+                "session_id": self.session_id,
+                "auth_token": self.auth_token,
+                "last_seen": now,
+            }
+        self._write_sessions(sessions, filepath)
+        self._log("INFO", f"Session enregistrée dans {filepath} pour {self.player_name}")
+
+    def load_session(self, pseudo: str | None = None, filepath: str = "session.json") -> bool:
+        """Charge une session par pseudo. Sans pseudo, prend l'entrée si elle est unique."""
+        sessions = self._read_sessions(filepath)
+        if pseudo is None and len(sessions) == 1:
+            pseudo = next(iter(sessions))
+        entry = sessions.get(pseudo) if pseudo else None
+        if not entry or time.time() - entry.get("last_seen", 0) > SESSION_TTL:
             return False
+        self.player_name = pseudo
+        self.session_id = entry["session_id"]
+        self.auth_token = entry["auth_token"]
+        return bool(self.session_id and self.auth_token)
 
     def request(self, msg_type: str, payload: dict | None = None) -> Message:
         """

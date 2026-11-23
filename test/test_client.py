@@ -1,6 +1,8 @@
 import socket
 import threading
+import json
 import pytest
+import time
 from client.connection import GameClient
 from protocol.framing import StreamFramer
 from protocol.message import Message
@@ -292,15 +294,36 @@ def test_send_without_socket_does_not_reconnect_silently(monkeypatch):
         client._send_and_wait(Message("NEW_GAME", 1))
 
 
-def test_quit_deletes_saved_session_file(tmp_path, monkeypatch):
+def test_quit_removes_only_current_player_entry(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "session.json").write_text("{}", encoding="utf-8")
+    path = tmp_path / "session.json"
+    path.write_text(json.dumps({
+        "Alice": {"session_id": "A1", "auth_token": "tA", "last_seen": time.time()},
+        "Bob":   {"session_id": "B1", "auth_token": "tB", "last_seen": time.time()},
+    }), encoding="utf-8")
     client = make_client(server_reply(1, "BYE", message="ok"))
-    client.session_id, client.auth_token = "S1", "tok"
+    client.player_name = "Alice"
+    client.session_id, client.auth_token = "A1", "tA"
 
     client.quit_game()
 
-    assert not (tmp_path / "session.json").exists()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert "Alice" not in data
+    assert "Bob" in data
+
+def test_quit_deletes_file_when_no_player_left(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "session.json"
+    path.write_text(json.dumps({
+        "Alice": {"session_id": "A1", "auth_token": "tA", "last_seen": time.time()},
+    }), encoding="utf-8")
+    client = make_client(server_reply(1, "BYE", message="ok"))
+    client.player_name = "Alice"
+    client.session_id, client.auth_token = "A1", "tA"
+
+    client.quit_game()
+
+    assert not path.exists()
 
 def test_pushed_chat_during_request_is_stored_not_returned():
     client = make_client(

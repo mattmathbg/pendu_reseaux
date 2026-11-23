@@ -115,8 +115,7 @@ class HangmanApp:
                 self.buttons[letter] = ctk.CTkButton(keys, text=letter, width=40, command=lambda l=letter: self.play(l))
                 self.buttons[letter].grid(row=i // 9, column=i % 9, padx=2, pady=2)
             actions = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
-            for text, command in (("Nouvelle manche", self.start_new_game), ("Abandonner", self.quit_game),
-                                ("Coupure simulée", self.simulate_disconnect)):
+            for text, command in (("Nouvelle manche", self.start_new_game), ("Abandonner", self.quit_game)):
                 _w(ctk.CTkButton, actions, text=text, command=command)
 
             # Onglet Chat
@@ -150,11 +149,11 @@ class HangmanApp:
         self._status(f"Connecté à {c.host}:{c.port} | Session : {(c.session_id or '')[:8]}... | Joueur : {c.player_name}")
 
     def _check_saved_session(self) -> None:
-        self.client.prune_sessions_file()   # supprime les entrées périmées
-        found = os.path.exists("session.json") and self.client.load_session("session.json")
+        sessions = self.client._read_sessions("session.json")
+        found = bool(sessions)
         self.resume_btn.configure(state="normal" if found else "disabled")
         if found:
-            self._status(f"Session détectée ({self.client.player_name})")
+            self._status(f"Sessions disponibles : {', '.join(sessions)}")
 
     def _target(self) -> tuple[str, int] | None:
         try:
@@ -210,8 +209,9 @@ class HangmanApp:
         port = self._read_port()
         if port is None:
             return
-        if not self.client.session_id and not self.client.load_session("session.json"):
-            messagebox.showinfo("Aucune session", "Aucune session enregistrée à reprendre.")
+        pseudo = self.pseudo_var.get().strip()
+        if not self.client.session_id and not self.client.load_session(pseudo, "session.json"):
+            messagebox.showinfo("Aucune session", f"Aucune session enregistrée pour « {pseudo} ».")
             return
         endpoints = getattr(self, "selected_endpoints", None) or [{"host": "127.0.0.1"}]
         resp = self._do(self.controller.resume, endpoints, port, title="Reprise impossible")
@@ -283,13 +283,6 @@ class HangmanApp:
         self.info_var.set("Partie abandonnée.")
         self._set_room(None)
         self._keys(state="disabled")
-
-    def simulate_disconnect(self) -> None:
-        """Ferme la socket : la prochaine action déclenche la reprise automatique (RESUME)."""
-        self.client.close()
-        self._status("Socket coupée (simulation)")
-        messagebox.showinfo("Coupure simulée", "Socket fermée.\n\nCliquez sur une lettre : le client se reconnecte, "
-                            "envoie RESUME et rejoue la requête avec le même request_id.")
 
     def update_from_state(self, resp) -> None:
         p = resp.payload
