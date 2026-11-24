@@ -325,3 +325,24 @@ def test_poll_processes_message_already_in_framer():
     finally:
         a.close()
         b.close()
+
+
+def test_save_and_load_session_ignore_legacy_malformed_entries(tmp_path):
+    path = tmp_path / "session.json"
+    path.write_text(json.dumps({
+        "player_name": "Joueur",
+        "session_id": "old-id",
+        "sessions": {"Joueur": {"session_id": "old-id", "auth_token": "old-tok"}},
+    }), encoding="utf-8")
+
+    client = GameClient()
+    client.player_name = "Alice"
+    client.session_id = "S1"
+    client.auth_token = "T1"
+
+    assert client.load_session("Joueur", str(path)) is False
+    client.save_session(str(path))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert "player_name" not in data
+    assert "sessions" not in data
+    assert data["Alice"]["session_id"] == "S1"

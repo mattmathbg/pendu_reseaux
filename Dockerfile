@@ -13,5 +13,5 @@ COPY certs/ ./certs/
 
 EXPOSE 8888/tcp 8889/udp
 
-# Écoute sur 0.0.0.0 pour être accessible depuis l'hôte
-CMD ["python", "-m", "server.server", "--host", "0.0.0.0", "--port", "8888"]
+# Écoute sur 0.0.0.0 et :: (dual-stack IPv4/IPv6) par défaut
+CMD ["python", "-m", "server.server", "--port", "8888"]

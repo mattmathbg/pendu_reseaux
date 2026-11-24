@@ -37,6 +37,10 @@ session.json
 
 .agent/
 .impeccable/
-session.json
+
+# Clés privées TLS (ne jamais commiter)
+certs/*.key
+*.key
+*.pem
 
 pendu_reseaux/

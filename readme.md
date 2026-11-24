@@ -73,10 +73,10 @@ python -m client.gui
   * Sondage instantané depuis l'interface client (bouton « 🔍 Découvrir »).
 * **Chiffrement TLS 1.3** : Sécurisation intégrale des flux applicatifs via certificats X.509 (`server.crt` / `server.key`).
 * **Dictionnaire Dynamique & Secours Hors-ligne** :
-  * Intégration de l'API de mots avec **27 catégories au choix** (Animaux, Géographie, Cuisine, Sciences, Cinéma, etc.).
-  * Nettoyage automatique des accents et repli immédiat sur liste locale en cas d'indisponibilité de l'accès Internet.
-* **Salons Multi-Joueurs (Lobbies) & Chat Multiplexé** : Salons de jeu (`JOIN_ROOM`, `LEAVE_ROOM`) et canal de discussion textuelle en direct (`CHAT`).
-* **Interface Graphique Moderne (CustomTkinter)** : Thème sombre, clavier interactif, potence vectorielle animée, chronomètre et inspecteur de trames réseau en direct.
+  * Intégration de l'API de mots avec **27 catégories au choix** (Animaux, Voyages, Sports & Jeux, Arts, Aliments & Repas, etc.).
+  * Nettoyage automatique des accents/ligatures et repli immédiat sur liste locale en cas d'indisponibilité de l'accès Internet.
+* **Salons & Chat Multiplexé** : Salons de discussion (`JOIN_ROOM`, `LEAVE_ROOM`) et canal textuel en direct global ou par salon (`CHAT`).
+* **Interface Graphique Moderne (CustomTkinter)** : Thème sombre, clavier interactif, potence ASCII progressive, chronomètre et inspecteur de trames réseau en direct.
 
 ---
 
@@ -86,17 +86,18 @@ python -m client.gui
 
 ```text
 ┌───────────────────────────────────────────────────────────────┐
-│                        HangmanGame                            │
+│                            Pendu                              │
 ├───────────────────────────────────────────────────────────────┤
 │ - secret_word: str                                            │
 │ - guessed_letters: set[str]                                   │
 │ - max_errors: int                                             │
 │ - current_errors: int                                         │
-│ - state: GameState (IN_PROGRESS, WON, LOST, ABANDONED)        │
+│ - state: GameState (EN_COURS, GAGNE, PERDU, ABANDONNE)        │
 ├───────────────────────────────────────────────────────────────┤
 │ + guess(letter: str) -> bool                                  │
 │ + get_masked_word() -> str                                    │
 │ + is_finished() -> bool                                       │
+│ + abandon() -> None                                           │
 └───────────────────────────────▲───────────────────────────────┘
                                 │ 1 compose
 ┌───────────────────────────────┴───────────────────────────────┐
@@ -105,14 +106,15 @@ python -m client.gui
 │ - session_id: str                                             │
 │ - auth_token: str                                             │
 │ - player_name: str                                            │
-│ - game: HangmanGame                                           │
+│ - room_id: str | None                                         │
+│ - game: Pendu | None                                          │
 │ - is_connected: bool                                          │
 │ - move_timeout: float                                         │
-│ - last_responses: dict[int, dict]  // Cache d'idempotence     │
+│ - last_response: dict | None       // Cache d'idempotence     │
 ├───────────────────────────────────────────────────────────────┤
-│ + handle_disconnect(ttl_seconds: int)                         │
+│ + handle_disconnect()                                         │
 │ + reconnect(auth_token: str) -> bool                          │
-│ + save_response(request_id: int, response: dict)              │
+│ + save_response(request_id: int, response: dict | Message)    │
 │ + get_cached_response(request_id: int) -> dict | None         │
 │ + is_timed_out() -> bool                                      │
 └───────────────────────────────▲───────────────────────────────┘
@@ -121,7 +123,7 @@ python -m client.gui
 │                      SessionManager                           │
 ├───────────────────────────────────────────────────────────────┤
 │ - sessions: dict[str, GameSession]                            │
-│ - timeout_task: asyncio.Task                                  │
+│ - timeout: float                                              │
 ├───────────────────────────────────────────────────────────────┤
 │ + create_session(player_name: str) -> GameSession             │
 │ + get_session(session_id: str) -> GameSession | None          │
@@ -131,9 +133,9 @@ python -m client.gui
 ┌───────────────────────────────┴───────────────────────────────┐
 │                      MessageDispatcher                        │
 ├───────────────────────────────────────────────────────────────┤
-│ - handlers: dict[str, Callable]                               │
+│ - _handlers: dict[str, Callable]                              │
 ├───────────────────────────────────────────────────────────────┤
-│ + register(msg_type: str, handler: Callable)                  │
+│ + register(msg_type: str)                                     │
 │ + dispatch(msg: Message, session: GameSession)                │
 └───────────────────────────────▲───────────────────────────────┘
                                 │ traite
@@ -168,16 +170,19 @@ Chaque trame est sérialisée en JSON UTF-8 et encadrée par un saut de ligne st
 
 | Type | Émetteur | Champs `payload` | Rôle & Réponse |
 | :--- | :--- | :--- | :--- |
-| `HELLO` | Client | `{"player_name": str}` | Authentification initiale. Réponse : `WELCOME` (`session_id`, `auth_token`). |
-| `NEW_GAME` | Client | `{"category_id": int | null}` | Démarre une manche (avec thème optionnel). Réponse : `STATE`. |
+| `HELLO` | Client | `{"player_name": str}` | Ouverture de session. Réponse : `WELCOME` (`session_id`, `auth_token`, `player_name`). |
+| `WELCOME` | Serveur | `{"session_id": str, "auth_token": str, "player_name": str}` | Confirmation de session et remise du jeton d'authentification. |
+| `NEW_GAME` | Client | `{"category_id": int}` (optionnel) | Démarre une manche (avec thème optionnel). Réponse : `STATE`. |
 | `LETTER` | Client | `{"letter": str}` | Proposition d'une lettre. Réponse : `STATE` ou `ERROR`. |
-| `STATE` | Serveur | `{"masked_word": str, "errors_left": int, ...}` | Diffusion de l'état actualisé de la partie. |
+| `STATE` | Serveur | `{"masked_word": str, "errors_left": int, ...}` | État actualisé de la partie (inclut `secret_word` en fin de manche). |
 | `RESUME` | Client | `{"auth_token": str}` | Restauration de session après coupure socket. Réponse : `STATE` ou `ERROR`. |
-| `JOIN_ROOM` | Client | `{"room_id": str}` | Rejoint un salon multi-joueurs. Réponse : `ROOM_JOINED`. |
-| `LEAVE_ROOM` | Client | `{}` | Quitte le salon courant. Réponse : `ROOM_LEFT`. |
-| `CHAT` | Client/Serveur | `{"text": str, "scope": "room"\|"global"}` | Message textuel instantané diffusé aux pairs. |
-| `QUIT` | Client | `{}` | Abandon ou fin ordonnée de session. Réponse : `BYE`. |
-| `ERROR` | Serveur | `{"code": str, "message": str}` | Erreur applicative (`INVALID_LETTER`, `TIMEOUT`, `UNKNOWN_SESSION`). |
+| `JOIN_ROOM` | Client | `{"room": str}` | Rejoint un salon (1 à 20 caractères). Réponse : `ROOM`. |
+| `LEAVE_ROOM` | Client | `{}` | Quitte le salon courant. Réponse : `ROOM` (`room_id: null`). |
+| `ROOM` | Serveur | `{"room_id": str \| null, "message": str}` | Confirmation de changement de salon. |
+| `CHAT` | Client/Serveur | `{"text": str, "scope": "room" \| "global"}` | Message textuel diffusé aux pairs (`request_id: 0` en push). |
+| `QUIT` | Client | `{}` | Clôture de session (abandonne la manche en cours). Réponse : `BYE`. |
+| `BYE` | Serveur | `{"message": str, "status": str \| null}` | Confirmation de fermeture de session. |
+| `ERROR` | Serveur | `{"code": str, "message": str}` | Erreur applicative (`INVALID_MESSAGE`, `INVALID_STATE`, `INVALID_LETTER`, `UNKNOWN_SESSION`, `PLAYER_NOT_ALLOWED`, `TIMEOUT`, `INTERNAL_ERROR`). |
 
 ---
 
@@ -188,27 +193,18 @@ Chaque trame est sérialisée en JSON UTF-8 et encadrée par un saut de ligne st
               │
           recv(HELLO)
               ▼
-           [ IDLE ] ◄────────────────────────┐
-              │                              │
-         recv(NEW_GAME)                       │
-              ▼                              │
-          [ EN_COURS ]                       │
-              │                              │
-       ┌───────┼──────────────────┐           │
-       │       │                  │           │
-  recv(LETTER) │             Coupure TCP      │
-       │       │                  │           │
-       ▼       │                  ▼           │
-   [ EVAL ]    │        [ DISCONNECTED_WAIT ] │
-       │       │                  │           │
-   ├───┴───────┤              recv(RESUME)    │
-   │           │                  │           │
-Victoire   Défaite               └───────────┤
-   │           │                              │
-   ▼           ▼                              │
- [ GAGNÉ ]  [ PERDU ]                         │
-   │           │                              │
-   └───────────┴─── Nouvelle partie ──────────┘
+           [ IDLE ] ◄──────────────────────────────────┐
+              │                                        │
+         recv(NEW_GAME)                                │
+              ▼                                        │
+          [ EN_COURS ]                                 │
+        /     │      \                                 │
+  Victoire  Défaite  QUIT / Coupure TCP                │
+     │        │        │             │                 │
+     ▼        ▼        ▼             ▼                 │
+ [ GAGNE ] [ PERDU ] [ ABANDONNE ] [ SUSPENDU (60s) ]  │
+     │        │        │             │                 │
+     └────────┴────────┴── NEW_GAME ─┴── recv(RESUME) ─┘
 ```
 
 ---
@@ -231,10 +227,7 @@ pytest -v
 
 ## 📚 Documentation Complémentaire
 
-- 📖 [EXPLICATIONS_ARCHITECTURE.md](EXPLICATIONS_ARCHITECTURE.md) : Analyse détaillée du paquet réseau, du framing et des mécanismes de résilience.
-- 📡 [EXPLICATIONS_DECOUVERTE_SERVEUR.md](EXPLICATIONS_DECOUVERTE_SERVEUR.md) : Fonctionnement du protocole de découverte UDP Multicast / Broadcast.
-- 📐 [DESIGN.md](DESIGN.md) : Conception logicielle, choix de design et séparation des responsabilités.
-- 📜 [Conception_du_protocole_applicatif.md](Conception_du_protocole_applicatif.md) : Spécification formelle initiale du protocole applicatif.
+- 📖 [COMPTE_RENDU.md](COMPTE_RENDU.md) : Compte-rendu complet (architecture, spécification du protocole, framing, machine à états, gestion des erreurs, reprise de session, TLS, découverte UDP et choix techniques).
 
 ---
 

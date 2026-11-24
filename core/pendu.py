@@ -45,6 +45,8 @@ class Pendu:
         - state : état initial positionné à GameState.IN_PROGRESS.
         """
         self.secret_word = secret_word.upper().strip()
+        if not self.secret_word or not any(c.isalpha() for c in self.secret_word):
+            raise ValueError("Le mot secret doit contenir au moins une lettre alphabétique.")
         self.guessed_letters = set()
         self.max_errors = max_errors
         self.current_errors = 0

@@ -38,7 +38,7 @@ jobs:
             --name "Pendu" `
             --paths "." `
             --collect-all customtkinter `
-            --add-data "certs;certs" `
+            --add-data "certs/server.crt;certs" `
             run_client.py
 
       - name: Créer l'archive zip

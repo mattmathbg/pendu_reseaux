@@ -25,6 +25,7 @@ from core.words import get_word_from_api
 # SSL/TLS
 #---------------------------------------------------------------------
 
+import os
 import ssl
 from pathlib import Path
 
@@ -34,10 +35,17 @@ def create_server_ssl_context(cert_dir: str = "certs") -> ssl.SSLContext:
         root_alt = Path(__file__).resolve().parent.parent / cert_dir
         if root_alt.exists():
             path = root_alt
+    cert_file = Path(os.environ.get("SSL_CERT_FILE") or (path / "server.crt"))
+    key_file = Path(os.environ.get("SSL_KEY_FILE") or (path / "server.key"))
+    if not cert_file.exists() or not key_file.exists():
+        raise FileNotFoundError(
+            f"Certificat ou clé TLS introuvable ({cert_file}, {key_file}). "
+            "Générez une paire locale avec openssl ou définissez SSL_CERT_FILE / SSL_KEY_FILE."
+        )
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     context.load_cert_chain(
-        certfile=str(path / "server.crt"),
-        keyfile=str(path / "server.key")
+        certfile=str(cert_file),
+        keyfile=str(key_file),
     )
     return context
 
@@ -290,23 +298,22 @@ class Server:
         return response, session
 
     async def _handle_new_game(self, msg: Message, session: GameSession) -> Message:
-        category_id = msg.payload.get("category_id")
-        secret, theme = get_word_from_api(category_id)
-        session.theme = theme
-
-        if session.game is None or session.game.is_finished():
-            session.game = Pendu(secret_word=secret, max_errors=6)
-            custom_timeout = msg.payload.get("timeout")
-            if isinstance(custom_timeout, (int, float)) and custom_timeout > 0:
-                session.move_timeout = float(custom_timeout)
-            session.reset_move_timer()
-        else:
+        if session.game is not None and not session.game.is_finished():
             return Message(
                 type="ERROR",
                 request_id=msg.request_id,
                 session_id=session.session_id,
-                payload={"code": "INVALID_STATE", "message": "Une partie est déjà en cours."}
+                payload={"code": "INVALID_STATE", "message": "Une partie est déjà en cours."},
             )
+
+        category_id = msg.payload.get("category_id")
+        secret, theme = await asyncio.to_thread(get_word_from_api, category_id)
+        session.theme = theme
+        session.game = Pendu(secret_word=secret, max_errors=6)
+        custom_timeout = msg.payload.get("timeout")
+        if isinstance(custom_timeout, (int, float)) and not isinstance(custom_timeout, bool) and custom_timeout > 0:
+            session.move_timeout = float(custom_timeout)
+        session.reset_move_timer()
         return self._build_state_message(msg.request_id, session)
 
     async def _handle_letter(self, msg: Message, session: GameSession) -> Message:
@@ -323,14 +330,16 @@ class Server:
 
         if session.is_timed_out():
             session.game.state = GameState.LOST
+            payload = self._state_payload(session)
+            payload["code"] = "TIMEOUT"
+            payload["message"] = (
+                f"Délai maximal de réflexion dépassé ({session.move_timeout}s). La partie est perdue."
+            )
             return Message(
                 type="ERROR",
                 request_id=msg.request_id,
                 session_id=session.session_id,
-                payload={
-                    "code": "TIMEOUT",
-                    "message": f"Délai maximal de réflexion dépassé ({session.move_timeout}s). La partie est perdue.",
-                },
+                payload=payload,
             )
 
         letter = msg.payload.get("letter", "")
@@ -367,7 +376,8 @@ class Server:
             },
         )
 
-    def _build_state_message(self, request_id: int, session: GameSession) -> Message:
+    def _state_payload(self, session: GameSession) -> dict[str, Any]:
+        """Construit le dictionnaire d'état courant d'une partie."""
         game = session.game
         payload: dict[str, Any] = {
             "masked_word": game.get_masked_word(),
@@ -380,12 +390,14 @@ class Server:
         }
         if game.is_finished():
             payload["secret_word"] = game.secret_word
+        return payload
 
+    def _build_state_message(self, request_id: int, session: GameSession) -> Message:
         return Message(
             type="STATE",
             request_id=request_id,
             session_id=session.session_id,
-            payload=payload,
+            payload=self._state_payload(session),
         )
 
     async def _cleanup_loop(self) -> None:

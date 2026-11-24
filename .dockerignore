@@ -11,3 +11,6 @@ venv/
 *.png
 *.svg
 session.json
+certs/*.key
+*.key
+*.pem

@@ -26,7 +26,7 @@ END_MESSAGES = {
     "PERDU": "💀 Dommage, vous avez épuisé tous vos essais...",
     "ABANDONNE": "Partie abandonnée.",
 }
-THEME = {"key": ("#3B8ED0", "#1F6AA5"), "ok": "#16A34A", "bad": "#DC2626"}
+THEME = {"key": ("#3B8ED0", "#1F6AA5"), "ok": "#16A34A", "bad": "#DC2626", "disabled": ("#9CA3AF", "#4B5563")}
 MONO = "Consolas"
 
 # Potence en texte : une étape par nombre d'erreurs (0 à 6)
@@ -95,9 +95,8 @@ class HangmanApp:
     def _build_ui(self) -> None:
             # Connexion
             top = _w(ctk.CTkFrame, self.root, {"fill": "x", "padx": 8, "pady": 6}, fg_color="transparent")
-            for label, var, width in (("Port", self.port_var, 60), ("Pseudo", self.pseudo_var, 100)):
-                _w(ctk.CTkLabel, top, text=label)
-                _w(ctk.CTkEntry, top, textvariable=var, width=width).bind("<Return>", lambda _: self.connect_or_disconnect())
+            _w(ctk.CTkLabel, top, text="Pseudo")
+            _w(ctk.CTkEntry, top, textvariable=self.pseudo_var, width=120).bind("<Return>", lambda _: self.connect_or_disconnect())
             self.tls_label = _w(ctk.CTkLabel, top, text="TLS 🔒", text_color="#10B981", font=(MONO, 12, "bold"))
             self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
             self.resume_btn = _w(ctk.CTkButton, top, text="Reprendre", width=90, command=self.resume_existing_session)
@@ -124,8 +123,8 @@ class HangmanApp:
             actions = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
             _w(ctk.CTkLabel, actions, text="Catégorie :")
             self.category_menu = _w(ctk.CTkOptionMenu, actions, variable=self.category_var, values=list(CATEGORIES.values()), width=190)
-            for text, command in (("Nouvelle manche", self.start_new_game), ("Abandonner", self.quit_game)):
-                _w(ctk.CTkButton, actions, text=text, command=command)
+            self.new_game_btn = _w(ctk.CTkButton, actions, text="Nouvelle manche", command=self.start_new_game)
+            self.quit_btn = _w(ctk.CTkButton, actions, text="Abandonner", command=self.quit_game)
 
             # Onglet Chat
             self.chat_scope_seg = _w(ctk.CTkSegmentedButton, chat, {"anchor": "e"},
@@ -177,11 +176,15 @@ class HangmanApp:
             resp = action(*args)
         except (ConnectionError, OSError) as exc:
             self._status("Déconnecté")
+            self._set_new_game_enabled(True)
             messagebox.showerror(title, str(exc))
             return None
         if resp is None:
             return None
         if resp.type == "ERROR":
+            if resp.payload.get("code") == "TIMEOUT":
+                self._handle_timeout_error(resp.payload)
+                return None
             messagebox.showwarning(title, f"{resp.payload.get('code')} : {resp.payload.get('message')}")
             return None
         return resp
@@ -200,6 +203,7 @@ class HangmanApp:
             self.client.close()
             self.connect_btn.configure(text="Connexion")
             self._status("Déconnecté")
+            self._set_new_game_enabled(True)
         else:
             self._login()
 
@@ -305,9 +309,10 @@ class HangmanApp:
         self.info_var.set("Partie abandonnée.")
         self._set_room(None)
         self._keys(state="disabled")
+        self._set_new_game_enabled(True)
 
-    def update_from_state(self, resp) -> None:
-        p = resp.payload
+    def _apply_state_payload(self, p: dict) -> str | None:
+        """Met à jour les widgets de jeu depuis un payload d'état et renvoie le statut."""
         max_errors = p.get("max_errors", 6)
         masked = p.get("masked_word", "")
         self.word_var.set("  ".join(masked.replace(" ", "")))
@@ -325,10 +330,38 @@ class HangmanApp:
             key = letter.upper()
             if key in self.buttons:
                 self.buttons[key].configure(state="disabled", fg_color=THEME["ok"] if key in masked else THEME["bad"])
+        return status
+
+    def update_from_state(self, resp) -> None:
+        p = resp.payload
+        status = self._apply_state_payload(p)
+        self._set_new_game_enabled(status != "EN_COURS")
         if status == "EN_COURS" and self._timer_started_at is None:
             self._start_timer()
         elif status in END_MESSAGES:
             self._end_game(p, status)
+
+    def _handle_timeout_error(self, p: dict) -> None:
+        """Resynchronise l'interface lorsque le serveur prononce une défaite par TIMEOUT."""
+        if "masked_word" in p:
+            self._apply_state_payload(p)
+        elapsed = self._stop_timer()
+        self._keys(state="disabled")
+        self._set_new_game_enabled(True)
+        self.info_var.set(END_MESSAGES["PERDU"])
+        details = p.get("message") or "Délai maximal dépassé : la partie est perdue."
+        if elapsed:
+            details += f"\n\n⏱ Temps écoulé : {elapsed}"
+        if p.get("secret_word"):
+            details += f"\n\n📖 Le mot était : {p['secret_word']}"
+        messagebox.showwarning("Temps dépassé", details)
+
+    def _set_new_game_enabled(self, enabled: bool) -> None:
+        """Active ou grise le bouton « Nouvelle manche » selon l'état de la partie."""
+        if enabled:
+            self.new_game_btn.configure(state="normal", fg_color=THEME["key"])
+        else:
+            self.new_game_btn.configure(state="disabled", fg_color=THEME["disabled"])
 
     def _end_game(self, p: dict, status: str) -> None:
         elapsed = self._stop_timer()
@@ -467,6 +500,7 @@ class HangmanApp:
         except (ConnectionError, OSError):
             self.client.close()
             self._status("Déconnecté")
+            self._set_new_game_enabled(True)
         self.root.after(200, self._refresh)
 
     def _on_close(self) -> None:

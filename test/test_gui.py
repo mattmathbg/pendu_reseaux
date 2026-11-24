@@ -130,6 +130,8 @@ def test_update_from_state_in_progress(app_instance):
     assert app_instance.buttons["E"].cget("state") == "disabled"
     assert app_instance.buttons["X"].cget("state") == "disabled"
     assert app_instance.buttons["A"].cget("state") == "normal"
+    assert app_instance.new_game_btn.cget("state") == "disabled"
+    assert app_instance.new_game_btn.cget("fg_color") == THEME["disabled"]
 
 
 def test_update_from_state_game_over(app_instance, monkeypatch):
@@ -151,6 +153,8 @@ def test_update_from_state_game_over(app_instance, monkeypatch):
     app_instance.update_from_state(resp)
     for btn in app_instance.buttons.values():
         assert btn.cget("state") == "disabled"
+    assert app_instance.new_game_btn.cget("state") == "normal"
+    assert app_instance.new_game_btn.cget("fg_color") == THEME["key"]
 
 
 def test_hangman_text_stage(app_instance):
@@ -274,3 +278,38 @@ def test_gui_category_selection_in_new_game(app_instance):
     app_instance.start_new_game()
     mock_new_game.assert_called_once_with(19)
     assert "ANIMAUX" in app_instance.theme_var.get()
+
+
+def test_gui_timeout_error_resyncs_and_reenables_new_game(app_instance):
+    app_instance.update_from_state(
+        Message(
+            type="STATE",
+            request_id=1,
+            payload={"masked_word": "_ _ _", "errors_left": 6, "max_errors": 6, "used_letters": [], "status": "EN_COURS"},
+        )
+    )
+    assert app_instance.new_game_btn.cget("state") == "disabled"
+    assert app_instance._timer_started_at is not None
+
+    timeout_resp = Message(
+        type="ERROR",
+        request_id=2,
+        payload={
+            "code": "TIMEOUT",
+            "message": "Délai dépassé.",
+            "masked_word": "_ _ _",
+            "errors_left": 6,
+            "max_errors": 6,
+            "used_letters": [],
+            "status": "PERDU",
+            "secret_word": "SOL",
+        },
+    )
+    app_instance.controller.guess = MagicMock(return_value=timeout_resp)
+    app_instance.play("A")
+
+    assert app_instance._timer_started_at is None
+    assert app_instance.new_game_btn.cget("state") == "normal"
+    assert app_instance.new_game_btn.cget("fg_color") == THEME["key"]
+    for btn in app_instance.buttons.values():
+        assert btn.cget("state") == "disabled"

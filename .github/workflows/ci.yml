@@ -24,6 +24,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio customtkinter
 
+      - name: Générer un certificat TLS de test éphémère
+        run: |
+          if [ ! -f certs/server.key ]; then
+            openssl req -x509 -newkey rsa:2048 -nodes \
+              -keyout certs/server.key -out certs/server.crt \
+              -days 1 -subj "/CN=localhost"
+          fi
+
       - name: Run tests
         run: |
           sudo apt-get update && sudo apt-get install -y xvfb

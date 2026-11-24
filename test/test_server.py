@@ -616,6 +616,8 @@ async def test_letter_timeout_marks_game_lost_and_allows_new_game():
     )
     assert resp2.type == "ERROR"
     assert resp2.payload["code"] == "TIMEOUT"
+    assert resp2.payload["status"] == "PERDU"
+    assert resp2.payload["secret_word"] == session.game.secret_word
     assert session.game.state == GameState.LOST
     assert session.game.is_finished() is True
 
@@ -625,3 +627,22 @@ async def test_letter_timeout_marks_game_lost_and_allows_new_game():
     )
     assert resp3.type == "STATE"
     assert session.game.state == GameState.IN_PROGRESS
+
+
+async def test_new_game_in_progress_does_not_call_api_or_overwrite_theme(monkeypatch):
+    srv = Server(port=0)
+    session = srv.sessions.create_session("Alice")
+    session.game = Pendu("PYTHON")
+    session.theme = "Animaux"
+
+    called = []
+    monkeypatch.setattr("server.server.get_word_from_api", lambda *a, **k: called.append(a) or ("AUTRE", "Sports"))
+
+    resp, _ = await srv._dispatch_message(
+        Message(type="NEW_GAME", request_id=2, session_id=session.session_id, payload={"category_id": 16}),
+        session,
+    )
+    assert resp.type == "ERROR"
+    assert resp.payload["code"] == "INVALID_STATE"
+    assert called == []
+    assert session.theme == "Animaux"

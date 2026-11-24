@@ -190,7 +190,16 @@ class GameClient:
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data if isinstance(data, dict) else {}
+            if not isinstance(data, dict):
+                return {}
+            return {
+                name: entry
+                for name, entry in data.items()
+                if isinstance(name, str)
+                and isinstance(entry, dict)
+                and isinstance(entry.get("session_id"), str)
+                and isinstance(entry.get("auth_token"), str)
+            }
         except Exception:
             return {}
 

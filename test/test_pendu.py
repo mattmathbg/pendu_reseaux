@@ -81,3 +81,38 @@ def test_guess_after_abandon_is_refused():
     game.abandon()
     with pytest.raises(InvalidStateError):
         game.guess("A")
+
+
+def test_empty_or_non_alpha_secret_word_raises():
+    with pytest.raises(ValueError):
+        Pendu("")
+    with pytest.raises(ValueError):
+        Pendu("123---")
+
+
+def test_get_word_from_api_rejects_empty_and_normalizes_ligatures(monkeypatch):
+    import io
+    import core.words as words_mod
+
+    class FakeResp:
+        def __init__(self, body: bytes) -> None:
+            self._body = body
+        def read(self) -> bytes:
+            return self._body
+
+    monkeypatch.setattr(words_mod.urllib.request, "urlopen", lambda *a, **k: FakeResp(b'[{"name": ""}]'))
+    word, _ = words_mod.get_word_from_api()
+    assert word in words_mod.MOTS_SECOURS
+
+    monkeypatch.setattr(words_mod.urllib.request, "urlopen", lambda *a, **k: FakeResp(b'[{"name": "123"}]'))
+    word, _ = words_mod.get_word_from_api()
+    assert word in words_mod.MOTS_SECOURS
+
+    monkeypatch.setattr(
+        words_mod.urllib.request,
+        "urlopen",
+        lambda *a, **k: FakeResp('[{"name": "cœur", "categorie": "Corps"}]'.encode("utf-8")),
+    )
+    word, theme = words_mod.get_word_from_api()
+    assert word == "COEUR"
+    assert theme == "Corps"
