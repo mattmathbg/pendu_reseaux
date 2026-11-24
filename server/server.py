@@ -7,6 +7,7 @@ from typing import Any
 
 from core import pendu
 from core.pendu import (
+    GameState,
     Pendu,
     InvalidLetterError,
     LetterAlreadyTriedError,
@@ -29,6 +30,10 @@ from pathlib import Path
 
 def create_server_ssl_context(cert_dir: str = "certs") -> ssl.SSLContext:
     path = Path(cert_dir)
+    if not path.exists():
+        root_alt = Path(__file__).resolve().parent.parent / cert_dir
+        if root_alt.exists():
+            path = root_alt
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     context.load_cert_chain(
         certfile=str(path / "server.crt"),
@@ -317,13 +322,14 @@ class Server:
             )
 
         if session.is_timed_out():
+            session.game.state = GameState.LOST
             return Message(
                 type="ERROR",
                 request_id=msg.request_id,
                 session_id=session.session_id,
                 payload={
                     "code": "TIMEOUT",
-                    "message": f"Délai maximal de réflexion dépassé ({session.move_timeout}s). Action expirée.",
+                    "message": f"Délai maximal de réflexion dépassé ({session.move_timeout}s). La partie est perdue.",
                 },
             )
 
@@ -510,7 +516,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Serveur de Pendu Réseau")
     parser.add_argument("--host", default=None, help="Adresse d'écoute (défaut : dual-stack 127.0.0.1 et ::1)")
     parser.add_argument("--port", type=int, default=8888, help="Port d'écoute TCP (défaut : 8888)")
-    parser.add_argument("--tls", action="store_true", help="Activer TLS/SSL pour les connexions sécurisées")
+    parser.add_argument("--tls", action="store_true", default=True, help="Activer TLS/SSL pour les connexions sécurisées (défaut : activé)")
+    parser.add_argument("--no-tls", dest="tls", action="store_false", help="Désactiver TLS/SSL")
     parser.add_argument("--name", default="Serveur Pendu M1", help="Nom d'affichage du serveur pour la découverte réseau")
     parser.add_argument("--no-discovery", action="store_true", help="Désactiver l'annonce UDP Multicast")
     parser.add_argument("--timeout", type=float, default=60.0, help="Durée maximale par coup en secondes (défaut : 60s)")

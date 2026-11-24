@@ -57,6 +57,20 @@ class DiscoveryServer:
         self._sockets: list[socket.socket] = []
         self.endpoints: list[dict] = []
 
+    def _detect_local_endpoints(self) -> list[dict[str, str]]:
+        """Détecte les interfaces réseau IPv4 et IPv6 pour l'annonce."""
+        endpoints = []
+        try:
+            _, _, ips = socket.gethostbyname_ex(socket.gethostname())
+            for ip in ips:
+                if not ip.startswith("127.") and not ip.startswith("169.254."):
+                    endpoints.append({"family": "IPv4", "host": ip})
+        except Exception:
+            pass
+        endpoints.append({"family": "IPv4", "host": "127.0.0.1"})
+        endpoints.append({"family": "IPv6", "host": "::1"})
+        return endpoints
+
     def start(self) -> None:
         """Démarre le répondeur de découverte dans un thread daemon."""
         if self._running:
@@ -64,10 +78,7 @@ class DiscoveryServer:
 
         self._running = True
         self._sockets = self._create_listener_sockets()
-        self.endpoints = [
-            {"family": "IPv4", "host": "127.0.0.1"},
-            {"family": "IPv6", "host": "::1"},
-        ]
+        self.endpoints = self._detect_local_endpoints()
         self._thread = threading.Thread(target=self._run_loop, name="DiscoveryServer", daemon=True)
         self._thread.start()
         logger.info(f"[DISCOVERY] Répondeur démarré sur le port UDP {self.discovery_port}")
@@ -281,10 +292,29 @@ def discover_servers(
                             server_name = str(resp.get("server_name", "Serveur Pendu"))
                             players = int(resp.get("players_count", 0))
                             use_tls = bool(resp.get("use_tls", False))
-                            endpoints = resp.get("endpoints", [])
+                            raw_endpoints = resp.get("endpoints", [])
+                            # Prioriser l'adresse IP réelle de l'émetteur de la réponse UDP
+                            resolved_endpoints = []
+                            is_v6 = ":" in raw_ip
+                            resolved_endpoints.append({
+                                "family": "IPv6" if is_v6 else "IPv4",
+                                "host": raw_ip,
+                            })
+                            for ep in raw_endpoints:
+                                if isinstance(ep, dict):
+                                    h = ep.get("host")
+                                    if h and h not in ("127.0.0.1", "::1", raw_ip):
+                                        resolved_endpoints.append(ep)
+                            # Conserver loopback en dernier recours si la réponse provient du local
+                            if raw_ip in ("127.0.0.1", "::1"):
+                                for ep in raw_endpoints:
+                                    if ep not in resolved_endpoints:
+                                        resolved_endpoints.append(ep)
+
                             tls_badge = " [TLS 🔒]" if use_tls else ""
                             discovered[server_id] = {
-                                "endpoints": endpoints,
+                                "endpoints": resolved_endpoints,
+                                "ip": raw_ip,
                                 "port": tcp_port,
                                 "server_name": server_name,
                                 "players_count": players,

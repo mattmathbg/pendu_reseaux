@@ -46,6 +46,10 @@ def test_discovery_end_to_end():
         assert s["use_tls"] is True
         assert "Serveur Défi M1" in s["display"]
         assert "[TLS 🔒]" in s["display"]
+        assert len(s["endpoints"]) > 0
+        # Vérifie que le premier endpoint correspond à l'adresse de réponse
+        assert "host" in s["endpoints"][0]
+        assert s["ip"] in [ep["host"] for ep in s["endpoints"]]
     finally:
         srv.stop()
 

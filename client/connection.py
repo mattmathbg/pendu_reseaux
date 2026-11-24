@@ -30,15 +30,23 @@ def connect_to_server(endpoints: list[dict], port: int, timeout: float = 5.0) ->
 
 def create_client_ssl_context(ca_cert_path: str = "certs/server.crt") -> ssl.SSLContext:
     target_path = Path(ca_cert_path)
-    if not target_path.exists() and hasattr(sys, "_MEIPASS"):
-        alt = Path(sys._MEIPASS) / ca_cert_path
-        if alt.exists():
-            target_path = alt
+    if not target_path.exists():
+        if hasattr(sys, "_MEIPASS"):
+            alt = Path(sys._MEIPASS) / ca_cert_path
+            if alt.exists():
+                target_path = alt
+        else:
+            root_alt = Path(__file__).resolve().parent.parent / ca_cert_path
+            if root_alt.exists():
+                target_path = root_alt
     context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=str(target_path))
-    # Charge le certificat du serveur comme autorité de confiance
+    # Charge le certificat du serveur comme autorité de confiance (épinglage de certificat)
     context.load_verify_locations(cafile=str(target_path))
-    # Vérifie que le CN correspond (ex: localhost)
-    context.check_hostname = True
+    # Pour un certificat auto-signé de dev / LAN (CN=localhost sans SAN pour IP spécifiques) :
+    # On valide la chaîne cryptographique via le certificat épinglé tout en autorisant
+    # les connexions sur n'importe quelle adresse IP du réseau local.
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_REQUIRED
     return context
 
 

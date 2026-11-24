@@ -39,9 +39,14 @@ class GameController:
         self.client.connect()
         return self.client.hello(pseudo)
 
-    def resume(self, host: str, port: int) -> Message:
+    def resume(self, endpoints: list[dict] | str, port: int) -> Message:
         """Rouvre la connexion si besoin, puis reprend la session par RESUME."""
-        self.client.host = host
+        if isinstance(endpoints, list):
+            self.client.endpoints = endpoints
+            self.client.host = endpoints[0]["host"] if endpoints and "host" in endpoints[0] else "127.0.0.1"
+        else:
+            self.client.host = endpoints
+            self.client.endpoints = [{"host": endpoints}]
         self.client.port = port
         if not self.client.is_connected():
             self.client.connect()
