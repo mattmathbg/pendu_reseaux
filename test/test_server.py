@@ -594,3 +594,34 @@ async def test_sender_gets_own_request_id_not_zero():
                 payload={"text": "salut", "scope": "global"}), alice)
 
     assert response.request_id == 7
+
+
+async def test_letter_timeout_marks_game_lost_and_allows_new_game():
+    srv = Server(port=0, move_timeout=0.01)
+    session = srv.sessions.create_session("Alice", move_timeout=0.01)
+    # 1. Démarrer une nouvelle partie
+    resp1, _ = await srv._dispatch_message(
+        Message(type="NEW_GAME", request_id=1, session_id=session.session_id), session
+    )
+    assert resp1.type == "STATE"
+    assert session.game.state == GameState.IN_PROGRESS
+
+    # 2. Attendre que le timeout de coup expire
+    await asyncio.sleep(0.02)
+    assert session.is_timed_out() is True
+
+    # 3. Proposer une lettre doit renvoyer TIMEOUT et marquer la partie comme LOST
+    resp2, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=2, session_id=session.session_id, payload={"letter": "E"}), session
+    )
+    assert resp2.type == "ERROR"
+    assert resp2.payload["code"] == "TIMEOUT"
+    assert session.game.state == GameState.LOST
+    assert session.game.is_finished() is True
+
+    # 4. Le joueur peut alors démarrer une NOUVELLE partie sans deadlock
+    resp3, _ = await srv._dispatch_message(
+        Message(type="NEW_GAME", request_id=3, session_id=session.session_id), session
+    )
+    assert resp3.type == "STATE"
+    assert session.game.state == GameState.IN_PROGRESS

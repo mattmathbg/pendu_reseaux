@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 from client.gui import HangmanApp, THEME
 from client.connection import GameClient
 from protocol.message import Message
-from server.server import Server
+from server.server import Server, create_server_ssl_context
 import threading
 
 
@@ -104,6 +104,10 @@ def test_gui_initialization(app_instance):
     assert "6 / 6" in app_instance.info_var.get()
     assert app_instance.client is not None
     assert app_instance.tabview is not None
+    assert app_instance.client.use_tls is True
+    assert hasattr(app_instance, "tls_label")
+    assert hasattr(app_instance, "category_menu")
+    assert app_instance.category_var.get() == "Toutes (Aléatoire)"
 
 
 def test_update_from_state_in_progress(app_instance):
@@ -194,14 +198,15 @@ def test_chat_tab_has_room_bar_and_filters(app_instance):
 
 @pytest.fixture
 def real_server():
-    """Serveur TCP réel dans un thread séparé, avec sa propre boucle asyncio."""
-    srv = Server(host="127.0.0.1", port=0)
+    """Serveur TCP réel dans un thread séparé, avec sa propre boucle asyncio et TLS."""
+    srv = Server(host="127.0.0.1", port=0, use_tls=True)
     loop = asyncio.new_event_loop()
     ready = threading.Event()
     holder = {}
 
     async def boot():
-        holder["server"] = await asyncio.start_server(srv.recv, "127.0.0.1", 0)
+        ssl_ctx = create_server_ssl_context()
+        holder["server"] = await asyncio.start_server(srv.recv, "127.0.0.1", 0, ssl=ssl_ctx)
         holder["port"] = holder["server"].sockets[0].getsockname()[1]
         ready.set()
         await holder["server"].serve_forever()
@@ -238,3 +243,34 @@ def test_gui_connects_and_plays_on_real_server(app_instance, real_server, tmp_pa
     assert app.buttons["E"].cget("state") == "disabled"
 
     app.client.close()
+
+
+def test_gui_apply_discovered_server_sets_tls(app_instance):
+    assert hasattr(app_instance, "tls_label")
+    server_info = {
+        "endpoints": [{"host": "192.168.1.100", "family": "IPv4"}],
+        "port": 8888,
+        "server_name": "Docker TLS",
+        "players_count": 1,
+        "use_tls": True,
+        "display": "Docker TLS [TLS 🔒] — 1 joueur",
+    }
+    app_instance._apply_server(server_info)
+    assert app_instance.selected_endpoints == [{"host": "192.168.1.100", "family": "IPv4"}]
+    assert app_instance.port_var.get() == "8888"
+    assert app_instance.client.use_tls is True
+
+
+def test_gui_category_selection_in_new_game(app_instance):
+    dummy_resp = Message(type="STATE", request_id=1, payload={"masked_word": "_", "status": "EN_COURS", "category": "LES ANIMAUX"})
+    mock_new_game = MagicMock(return_value=dummy_resp)
+    app_instance.controller.new_game = mock_new_game
+    app_instance.client.is_connected = lambda: True
+    app_instance.client.session_id = "sess-1"
+
+    app_instance.category_var.set("Animaux")
+    assert app_instance._get_selected_category_id() == 19
+
+    app_instance.start_new_game()
+    mock_new_game.assert_called_once_with(19)
+    assert "ANIMAUX" in app_instance.theme_var.get()

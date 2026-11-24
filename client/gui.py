@@ -12,6 +12,7 @@ import customtkinter as ctk
 
 from client.connection import GameClient
 from client.controller import GameController
+from core.words import CATEGORIES
 from protocol.discovery import discover_servers
 
 # Résolution des bibliothèques Tcl/Tk sous Windows si nécessaire
@@ -53,7 +54,8 @@ class HangmanApp:
             ctk.set_appearance_mode("dark")
             root = ctk.CTk()
         self.root = root
-        self.client = client or GameClient("127.0.0.1", 8888)
+        self.client = client or GameClient("127.0.0.1", 8888, use_tls=True)
+        self.client.use_tls = True
         self.controller = GameController(self.client)
         self._gui_queue: queue.Queue = queue.Queue()
         self._timer_started_at: float | None = None
@@ -64,9 +66,12 @@ class HangmanApp:
         self.host_var = tk.StringVar(value=self.client.host)
         self.port_var = tk.StringVar(value=str(self.client.port))
         self.pseudo_var = tk.StringVar(value=self.client.player_name or "Joueur")
+        self.tls_var = tk.BooleanVar(value=True)
         self.word_var = tk.StringVar(value="_ _ _ _ _")
         self.timer_var = tk.StringVar(value="Temps : 00:00")
         self.info_var = tk.StringVar(value="Essais restants : 6 / 6")
+        self.theme_var = tk.StringVar(value="Catégorie : -")
+        self.category_var = tk.StringVar(value=CATEGORIES[0])
         self.lives_var = tk.StringVar(value="❤️ 6 / 6")
         self.errors_var = tk.StringVar(value="💀 0 / 6")
         self.hangman_var = tk.StringVar(value=HANGMAN_STAGES[0])
@@ -93,6 +98,7 @@ class HangmanApp:
             for label, var, width in (("Port", self.port_var, 60), ("Pseudo", self.pseudo_var, 100)):
                 _w(ctk.CTkLabel, top, text=label)
                 _w(ctk.CTkEntry, top, textvariable=var, width=width).bind("<Return>", lambda _: self.connect_or_disconnect())
+            self.tls_label = _w(ctk.CTkLabel, top, text="TLS 🔒", text_color="#10B981", font=(MONO, 12, "bold"))
             self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
             self.resume_btn = _w(ctk.CTkButton, top, text="Reprendre", width=90, command=self.resume_existing_session)
             self.discover_btn = _w(ctk.CTkButton, top, text="Découvrir", width=90, command=self.discover_local_servers)
@@ -105,6 +111,7 @@ class HangmanApp:
             # Onglet Jeu
             _w(ctk.CTkLabel, game, {"pady": 4}, textvariable=self.hangman_var, font=(MONO, 14), justify="left")
             _w(ctk.CTkLabel, game, {}, textvariable=self.word_var, font=(MONO, 32, "bold"))
+            _w(ctk.CTkLabel, game, {"pady": 2}, textvariable=self.theme_var, font=(MONO, 13, "bold"), text_color="#38BDF8")
             stats = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
             for var in (self.timer_var, self.lives_var, self.errors_var):
                 _w(ctk.CTkLabel, stats, {"side": "left", "padx": 10}, textvariable=var)
@@ -114,7 +121,9 @@ class HangmanApp:
             for i, letter in enumerate(ascii_uppercase):
                 self.buttons[letter] = ctk.CTkButton(keys, text=letter, width=40, command=lambda l=letter: self.play(l))
                 self.buttons[letter].grid(row=i // 9, column=i % 9, padx=2, pady=2)
-            actions = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
+            actions = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
+            _w(ctk.CTkLabel, actions, text="Catégorie :")
+            self.category_menu = _w(ctk.CTkOptionMenu, actions, variable=self.category_var, values=list(CATEGORIES.values()), width=190)
             for text, command in (("Nouvelle manche", self.start_new_game), ("Abandonner", self.quit_game)):
                 _w(ctk.CTkButton, actions, text=text, command=command)
 
@@ -170,6 +179,8 @@ class HangmanApp:
             self._status("Déconnecté")
             messagebox.showerror(title, str(exc))
             return None
+        if resp is None:
+            return None
         if resp.type == "ERROR":
             messagebox.showwarning(title, f"{resp.payload.get('code')} : {resp.payload.get('message')}")
             return None
@@ -197,6 +208,7 @@ class HangmanApp:
         if port is None:
             return
         pseudo = self.pseudo_var.get().strip() or "Joueur"
+        self.client.use_tls = True
         endpoints = getattr(self, "selected_endpoints", None) or [{"host": "127.0.0.1"}]
         if self._do(self.controller.connect, endpoints, port, pseudo, title="Connexion impossible") is None:
             return
@@ -213,6 +225,7 @@ class HangmanApp:
         if not self.client.session_id and not self.client.load_session(pseudo, "session.json"):
             messagebox.showinfo("Aucune session", f"Aucune session enregistrée pour « {pseudo} ».")
             return
+        self.client.use_tls = True
         endpoints = getattr(self, "selected_endpoints", None) or [{"host": "127.0.0.1"}]
         resp = self._do(self.controller.resume, endpoints, port, title="Reprise impossible")
         if resp is None:
@@ -254,9 +267,17 @@ class HangmanApp:
     def _apply_server(self, s: dict) -> None:
         self.selected_endpoints = s["endpoints"]
         self.port_var.set(str(s["port"]))
+        self.client.use_tls = True
         self.info_var.set(f"Serveur sélectionné : {s['display']}")
 
     # --- PARTIE ---
+
+    def _get_selected_category_id(self) -> int | None:
+        selected_name = self.category_var.get()
+        for cat_id, name in CATEGORIES.items():
+            if name == selected_name and cat_id > 0:
+                return cat_id
+        return None
 
     def start_new_game(self) -> None:
         if not self.client.is_connected() or not self.client.session_id:
@@ -264,7 +285,8 @@ class HangmanApp:
             self._login()
             return
         self._keys(state="normal", fg_color=THEME["key"])
-        resp = self._do(self.controller.new_game)
+        cat_id = self._get_selected_category_id()
+        resp = self._do(self.controller.new_game, cat_id)
         if resp is not None:
             self.update_from_state(resp)
 
@@ -294,6 +316,9 @@ class HangmanApp:
         self.lives_var.set(f"❤️ {left} / {max_errors}")
         self.errors_var.set(f"💀 {made} / {max_errors}")
         self.info_var.set(f"Essais restants : {left} / {max_errors}  (Erreurs : {made})")
+        category = p.get("category")
+        if category:
+            self.theme_var.set(f"Catégorie : {category}")
         status = p.get("status")
         self._show_hangman(made, status)
         for letter in p.get("used_letters", []):
