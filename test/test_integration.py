@@ -91,7 +91,7 @@ async def test_resume_and_resilience_after_disconnect():
 
 @pytest.mark.asyncio
 async def test_idempotence_replay_request():
-    """Vérifie que renvoyer un même request_id retourne la même réponse en cache sans recalculer."""
+    """Le même request_id envoyé deux fois donne la même réponse, sans rejouer la lettre."""
     server_instance = Server(host="127.0.0.1", port=0)
     server = await asyncio.start_server(
         server_instance.recv, server_instance.host, server_instance.port
@@ -104,12 +104,18 @@ async def test_idempotence_replay_request():
         client.hello("Charlie")
         client.new_game()
 
-        # Envoi d'une lettre
         resp1 = client.guess("Z")
         errors1 = resp1.payload["errors_left"]
 
-        # Rejeu exact avec retry_last (même request_id)
-        resp2 = client.retry_last()
+        # Renvoi manuel de la même requête : même request_id, même contenu
+        replay = Message(
+            type="LETTER",
+            request_id=resp1.request_id,
+            session_id=client.session_id,
+            payload={"letter": "Z"},
+        )
+        resp2 = client._send_and_wait(replay)
+
         assert resp2.request_id == resp1.request_id
         assert resp2.payload["errors_left"] == errors1
         assert resp2.payload["masked_word"] == resp1.payload["masked_word"]
@@ -118,7 +124,6 @@ async def test_idempotence_replay_request():
 
     async with server:
         await asyncio.to_thread(client_flow)
-
 
 @pytest.mark.asyncio
 async def test_ipv6_connection():

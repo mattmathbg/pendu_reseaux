@@ -63,7 +63,6 @@ class GameClient:
         self.auth_token: str | None = None
         self.player_name: str | None = None
         self.last_message: Message | None = None
-        self.auto_reconnect: bool = False
         self.log_callback: Callable[[str, str], None] | None = None
         self.use_tls: bool = use_tls  # Indique si la connexion doit utiliser TLS/SSL
         self.inbox: list[dict] = []
@@ -125,7 +124,7 @@ class GameClient:
         if resp.type == "WELCOME":
             self.session_id = resp.payload.get("session_id", resp.session_id)
             self.auth_token = resp.payload.get("auth_token")
-            self.auto_reconnect = True
+        
         return resp
 
     def new_game(self, player: str | None = None, category_id: int | None = None) -> Message:
@@ -160,8 +159,6 @@ class GameClient:
             self.auth_token = auth_token
 
         resp = self.request("RESUME", {"auth_token": self.auth_token})
-        if resp.type == "STATE":
-            self.auto_reconnect = True
         return resp
 
     def quit_game(self) -> Message:
@@ -170,7 +167,6 @@ class GameClient:
         self.forget_session()         
         self.session_id = None
         self.auth_token = None
-        self.auto_reconnect = False
         return resp
 
     def forget_session(self, filepath: str = "session.json") -> None:
@@ -226,12 +222,7 @@ class GameClient:
         return bool(self.session_id and self.auth_token)
 
     def request(self, msg_type: str, payload: dict | None = None) -> Message:
-        """
-        Envoie une requête au serveur et attend la réponse sérialisée.
-        Incrémente next_request_id et conserve la requête pour l'idempotence.
-        En cas de coupure réseau, tente automatiquement de se reconnecter
-        et de rejouer la requête via retry_last().
-        """
+        """Envoie une requête et attend la réponse. En cas de coupure, l'erreur remonte à l'interface."""
         msg = Message(
             type=msg_type,
             request_id=self.next_request_id,
@@ -239,47 +230,8 @@ class GameClient:
             payload=payload or {},
         )
         self.next_request_id += 1
-        self.last_message = msg
+        return self._send_and_wait(msg)
 
-        try:
-            return self._send_and_wait(msg)
-        except (ConnectionError, OSError) as e:
-            # Reconnexion transparente seulement si session active et requête métier
-            if (
-                self.auto_reconnect
-                and self.session_id
-                and self.auth_token
-                and msg_type not in ("HELLO", "RESUME", "QUIT")
-            ):
-                self._log(
-                    "RECONNEXION",
-                    f"Coupure détectée ({e}). Tentative de reconnexion et RESUME...",
-                )
-                try:
-                    self.close()
-                    self.connect()
-                    resume_resp = self.resume(self.session_id, self.auth_token)
-                    if resume_resp.type == "ERROR":
-                        raise ConnectionError(
-                            f"Échec RESUME : {resume_resp.payload.get('message')}"
-                        )
-
-                    self._log(
-                        "RECONNEXION",
-                        f"Session restaurée. Renvoi de la requête (idempotence id={msg.request_id})...",
-                    )
-                    self.last_message = msg
-                    return self.retry_last()
-                except Exception as rec_err:
-                    self._log("ERREUR", f"Échec reconnexion automatique : {rec_err}")
-                    raise
-            raise
-
-    def retry_last(self) -> Message:
-        """Renvoie la dernière requête avec le MÊME request_id (idempotence)."""
-        if self.last_message is None:
-            raise ValueError("Aucune dernière requête à renvoyer.")
-        return self._send_and_wait(self.last_message)
 
     def _send_and_wait(self, msg: Message) -> Message:
         """Envoi bas-niveau avec encadrement framing et lecture bloquante."""

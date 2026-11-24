@@ -192,43 +192,6 @@ def test_timeout_is_propagated():
         client.request("NEW_GAME")
 
 
-# --- TESTS : RENVOI D'UNE REQUÊTE (partie 6.1 du sujet) ---
-
-def test_request_keeps_last_message():
-    client = make_client(server_reply(1))
-    client.request("LETTER", {"letter": "e"})
-    assert client.last_message.type == "LETTER"
-    assert client.last_message.request_id == 1
-
-
-def test_retry_last_resends_same_request_id():
-    client = make_client(server_reply(5), server_reply(5))
-    client.next_request_id = 5
-    client.request("LETTER", {"letter": "e"})
-    client.retry_last()
-    first, second = sent_message(client, 0), sent_message(client, 1)
-    assert first.request_id == second.request_id == 5
-    assert first.payload == second.payload == {"letter": "e"}
-
-
-def test_retry_last_does_not_increment_counter():
-    client = make_client(server_reply(1), server_reply(1))
-    client.request("NEW_GAME")
-    counter_before = client.next_request_id
-    client.retry_last()
-    assert client.next_request_id == counter_before
-
-
-def test_retry_after_lost_response():
-    """Scénario du sujet : la réponse se perd, on renvoie avec le même id."""
-    client = make_client()                       # 1re tentative : connexion coupée
-    with pytest.raises(ConnectionError):
-        client.request("LETTER", {"letter": "e"})
-    client.sock = FakeSocket([server_reply(1, word="_e__e")])   # « reconnexion »
-    response = client.retry_last()
-    assert response.request_id == 1
-    assert sent_message(client).request_id == 1   # même numéro que la 1re tentative
-
 
 # --- TEST AVEC UN VRAI RÉSEAU ---
 
@@ -265,23 +228,6 @@ def test_real_socket_roundtrip():
         thread.join(timeout=2)
 
 
-def test_auto_reconnect_replays_original_request(monkeypatch):
-    client = make_client()   # 1re socket : recv() renvoie b"" = coupure
-    client.session_id, client.auth_token, client.auto_reconnect = "S1", "tok", True
-
-    def fake_connect():
-        client.framer = StreamFramer()
-        client.sock = FakeSocket([server_reply(2, status="EN_COURS"),
-                                  server_reply(1, masked_word="_ E _")])
-
-    monkeypatch.setattr(client, "connect", fake_connect)
-
-    response = client.request("LETTER", {"letter": "e"})   # request_id 1
-
-    sent = [Message.deserialize(d.rstrip(b"\n")) for d in client.sock.sent]
-    assert [m.type for m in sent] == ["RESUME", "LETTER"]
-    assert sent[1].request_id == 1                          # même id qu'au départ
-    assert response.request_id == 1
 
 
 def test_send_without_socket_does_not_reconnect_silently(monkeypatch):
