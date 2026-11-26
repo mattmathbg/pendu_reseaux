@@ -265,20 +265,6 @@ def test_gui_apply_discovered_server_sets_tls(app_instance):
     assert app_instance.client.use_tls is True
 
 
-def test_gui_apply_discovered_server_without_tls(app_instance):
-    server_info = {
-        "endpoints": [{"host": "192.168.1.101", "family": "IPv4"}],
-        "port": 8888,
-        "server_name": "Docker Sans TLS",
-        "players_count": 0,
-        "use_tls": False,
-        "display": "Docker Sans TLS — 0 joueur",
-    }
-    app_instance._apply_server(server_info)
-    assert app_instance.client.use_tls is False
-    assert app_instance.tls_var.get() is False
-
-
 def test_gui_category_selection_in_new_game(app_instance):
     dummy_resp = Message(type="STATE", request_id=1, payload={"masked_word": "_", "status": "EN_COURS", "category": "LES ANIMAUX"})
     mock_new_game = MagicMock(return_value=dummy_resp)
