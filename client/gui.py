@@ -97,7 +97,18 @@ class HangmanApp:
             top = _w(ctk.CTkFrame, self.root, {"fill": "x", "padx": 8, "pady": 6}, fg_color="transparent")
             _w(ctk.CTkLabel, top, text="Pseudo")
             _w(ctk.CTkEntry, top, textvariable=self.pseudo_var, width=120).bind("<Return>", lambda _: self.connect_or_disconnect())
-            self.tls_label = _w(ctk.CTkLabel, top, text="TLS 🔒", text_color="#10B981", font=(MONO, 12, "bold"))
+            self.tls_label = _w(
+                ctk.CTkCheckBox,
+                top,
+                text="TLS 🔒",
+                variable=self.tls_var,
+                command=self._on_tls_toggle,
+                width=70,
+                checkbox_width=18,
+                checkbox_height=18,
+                text_color="#10B981",
+                font=(MONO, 12, "bold"),
+            )
             self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
             self.resume_btn = _w(ctk.CTkButton, top, text="Reprendre", width=90, command=self.resume_existing_session)
             self.discover_btn = _w(ctk.CTkButton, top, text="Découvrir", width=90, command=self.discover_local_servers)
@@ -212,7 +223,7 @@ class HangmanApp:
         if port is None:
             return
         pseudo = self.pseudo_var.get().strip() or "Joueur"
-        self.client.use_tls = True
+        self.client.use_tls = bool(self.tls_var.get())
         endpoints = getattr(self, "selected_endpoints", None) or [{"host": "127.0.0.1"}]
         if self._do(self.controller.connect, endpoints, port, pseudo, title="Connexion impossible") is None:
             return
@@ -229,7 +240,7 @@ class HangmanApp:
         if not self.client.session_id and not self.client.load_session(pseudo, "session.json"):
             messagebox.showinfo("Aucune session", f"Aucune session enregistrée pour « {pseudo} ».")
             return
-        self.client.use_tls = True
+        self.client.use_tls = bool(self.tls_var.get())
         endpoints = getattr(self, "selected_endpoints", None) or [{"host": "127.0.0.1"}]
         resp = self._do(self.controller.resume, endpoints, port, title="Reprise impossible")
         if resp is None:
@@ -268,10 +279,19 @@ class HangmanApp:
                 ctk.CTkButton(dialog, text=s["display"],
                               command=lambda s=s: (self._apply_server(s), dialog.destroy())).pack(padx=10, pady=4)
 
+    def _on_tls_toggle(self) -> None:
+        use_tls = bool(self.tls_var.get())
+        self.client.use_tls = use_tls
+        if use_tls:
+            self.tls_label.configure(text="TLS 🔒", text_color="#10B981")
+        else:
+            self.tls_label.configure(text="Sans TLS", text_color="#F59E0B")
+
     def _apply_server(self, s: dict) -> None:
         self.selected_endpoints = s["endpoints"]
         self.port_var.set(str(s["port"]))
-        self.client.use_tls = True
+        self.tls_var.set(bool(s.get("use_tls", False)))
+        self._on_tls_toggle()
         self.info_var.set(f"Serveur sélectionné : {s['display']}")
 
     # --- PARTIE ---
