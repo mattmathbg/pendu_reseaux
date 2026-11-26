@@ -99,7 +99,6 @@ class HangmanApp:
             _w(ctk.CTkEntry, top, textvariable=self.pseudo_var, width=120).bind("<Return>", lambda _: self.connect_or_disconnect())
             self.tls_label = _w(ctk.CTkLabel, top, text="TLS 🔒", text_color="#10B981", font=(MONO, 12, "bold"))
             self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
-            self.resume_btn = _w(ctk.CTkButton, top, text="Reprendre", width=90, command=self.resume_existing_session)
             self.discover_btn = _w(ctk.CTkButton, top, text="Découvrir", width=90, command=self.discover_local_servers)
             _w(ctk.CTkLabel, top, {"side": "right"}, textvariable=self.room_var)
             self.session_info_label = _w(ctk.CTkLabel, self.root, {"anchor": "w", "padx": 10}, text="Déconnecté")
@@ -158,9 +157,7 @@ class HangmanApp:
 
     def _check_saved_session(self) -> None:
         sessions = self.client._read_sessions("session.json")
-        found = bool(sessions)
-        self.resume_btn.configure(state="normal" if found else "disabled")
-        if found:
+        if sessions:
             self._status(f"Sessions disponibles : {', '.join(sessions)}")
 
     def _target(self) -> tuple[str, int] | None:
@@ -212,13 +209,24 @@ class HangmanApp:
         if port is None:
             return
         pseudo = self.pseudo_var.get().strip() or "Joueur"
-        self.client.use_tls = True
         endpoints = getattr(self, "selected_endpoints", None) or [{"host": "127.0.0.1"}]
+
+        if self.client.load_session(pseudo):
+            resp = self._do(self.controller.resume, endpoints, port, title="Reprise impossible")
+            if resp is not None:
+                self._mark_connected()
+                if resp.payload.get("status") == "IDLE":
+                    self.start_new_game()
+                else:
+                    self.update_from_state(resp)
+                return
+            # Session expirée ou refusée : on repart sur une nouvelle partie
+            self.client.close()
+
         if self._do(self.controller.connect, endpoints, port, pseudo, title="Connexion impossible") is None:
             return
         self._mark_connected()
         self.client.save_session("session.json")
-        self.resume_btn.configure(state="normal")
         self.start_new_game()
 
     def resume_existing_session(self) -> None:
