@@ -60,7 +60,6 @@ class HangmanApp:
         self._gui_queue: queue.Queue = queue.Queue()
         self._timer_started_at: float | None = None
         self._timer_after_id: str | None = None
-        self.current_room_id: str | None = None
         self.chat_history: list[dict] = []
 
         self.host_var = tk.StringVar(value=self.client.host)
@@ -75,7 +74,6 @@ class HangmanApp:
         self.lives_var = tk.StringVar(value="❤️ 6 / 6")
         self.errors_var = tk.StringVar(value="💀 0 / 6")
         self.hangman_var = tk.StringVar(value=HANGMAN_STAGES[0])
-        self.room_var = tk.StringVar(value="Salon : aucun")
 
         self.root.title("Pendu Réseau")
         self.root.geometry("900x720")
@@ -100,7 +98,6 @@ class HangmanApp:
             self.tls_label = _w(ctk.CTkLabel, top, text="TLS 🔒", text_color="#10B981", font=(MONO, 12, "bold"))
             self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
             self.discover_btn = _w(ctk.CTkButton, top, text="Découvrir", width=90, command=self.discover_local_servers)
-            _w(ctk.CTkLabel, top, {"side": "right"}, textvariable=self.room_var)
             self.session_info_label = _w(ctk.CTkLabel, self.root, {"anchor": "w", "padx": 10}, text="Déconnecté")
 
             self.tabview = _w(ctk.CTkTabview, self.root, {"fill": "both", "expand": True, "padx": 8, "pady": 4})
@@ -125,21 +122,13 @@ class HangmanApp:
             self.new_game_btn = _w(ctk.CTkButton, actions, text="Nouvelle manche", command=self.start_new_game)
             self.quit_btn = _w(ctk.CTkButton, actions, text="Abandonner", command=self.quit_game)
 
-            # Onglet Chat
-            self.chat_scope_seg = _w(ctk.CTkSegmentedButton, chat, {"anchor": "e"},
-                                    values=["Salon Courant", "Chat Global"],
-                                    command=lambda _: self._refresh_chat_display())
-            self.chat_scope_seg.set("Salon Courant")
+            # Onglet Chat (global uniquement)
             self.chat_box = _w(ctk.CTkTextbox, chat, {"fill": "both", "expand": True, "pady": 4}, state="disabled")
             send_row = _w(ctk.CTkFrame, chat, {"fill": "x"}, fg_color="transparent")
             self.chat_entry = _w(ctk.CTkEntry, send_row, {"side": "left", "fill": "x", "expand": True},
                                 placeholder_text="Votre message...")
             self.chat_entry.bind("<Return>", lambda _: self._send_chat_message())
             _w(ctk.CTkButton, send_row, text="Envoyer", width=80, command=self._send_chat_message)
-            room_row = _w(ctk.CTkFrame, chat, {"fill": "x", "pady": 4}, fg_color="transparent")
-            self.room_entry = _w(ctk.CTkEntry, room_row, width=240, placeholder_text="Nom du salon (1 à 20 caractères)")
-            _w(ctk.CTkButton, room_row, text="Rejoindre", width=90, command=self._join_room_from_entry)
-            _w(ctk.CTkButton, room_row, text="Quitter le salon", width=120, command=self._leave_room_action)
 
             # Onglet Réseau (inspecteur de trames)
             _w(ctk.CTkButton, log, {"anchor": "e"}, text="Effacer", width=80, command=self._clear_logs)
@@ -315,7 +304,6 @@ class HangmanApp:
         self._stop_timer()
         self._status("Session clôturée")
         self.info_var.set("Partie abandonnée.")
-        self._set_room(None)
         self._keys(state="disabled")
         self._set_new_game_enabled(True)
 
@@ -430,13 +418,11 @@ class HangmanApp:
         self.timer_var.set(f"Temps : {elapsed}")
         return elapsed
 
-    # --- CHAT ET SALONS ---
+    # --- CHAT GLOBAL ---
 
     def _visible_messages(self) -> list[dict]:
-        """Messages affichés selon la portée choisie (salon courant ou global)."""
-        if self.chat_scope_seg.get() == "Chat Global":
-            return [m for m in self.chat_history if m["scope"] == "global"]
-        return [m for m in self.chat_history if m["scope"] == "room" and m["room_id"] == self.current_room_id]
+        """Messages affichés dans le chat global."""
+        return [m for m in self.chat_history if m["scope"] == "global"]
 
     def _refresh_chat_display(self) -> None:
         self.chat_box.configure(state="normal")
@@ -453,7 +439,6 @@ class HangmanApp:
             "text": payload.get("text", ""),
             "time": datetime.now().strftime("%H:%M:%S"),
             "scope": payload.get("scope", "global"),
-            "room_id": payload.get("room_id"),
         })
         self._refresh_chat_display()
 
@@ -461,29 +446,10 @@ class HangmanApp:
         text = self.chat_entry.get().strip()
         if not text:
             return
-        scope = "room" if self.chat_scope_seg.get() == "Salon Courant" else "global"
-        resp = self._do(self.controller.chat, text, scope, title="Chat")
+        resp = self._do(self.controller.chat, text, "global", title="Chat")
         if resp is not None:
             self.chat_entry.delete(0, "end")
             self._add_chat_line(resp.payload)  # l'expéditeur ne reçoit pas son propre push
-
-    def _join_room_from_entry(self) -> None:
-        name = self.room_entry.get().strip()
-        if not name:
-            return
-        resp = self._do(self.controller.join_room, name, title="Salon")
-        if resp is not None:
-            self.room_entry.delete(0, "end")
-            self._set_room(resp.payload.get("room_id"))
-
-    def _leave_room_action(self) -> None:
-        if self._do(self.controller.leave_room, title="Salon") is not None:
-            self._set_room(None)
-
-    def _set_room(self, room_id: str | None) -> None:
-        self.current_room_id = room_id
-        self.room_var.set(f"Salon : {room_id or 'aucun'}")
-        self._refresh_chat_display()
 
     # --- LOGS RÉSEAU, BOUCLES PÉRIODIQUES ---
 

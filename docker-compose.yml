@@ -7,7 +7,7 @@ services:
       - "8888:8888"
       - "8889:8889/udp"
     volumes:
-      - ./certs:/app/certs
+      - ./certs:/app/certs:ro
     networks:
       - pendu
     restart: unless-stopped

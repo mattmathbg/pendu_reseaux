@@ -191,13 +191,18 @@ def test_key_press_handling(app_instance):
 
 
 
-def test_chat_tab_has_room_bar_and_filters(app_instance):
-    assert hasattr(app_instance, "room_entry")
+def test_chat_tab_shows_only_global_chat(app_instance):
+    assert not hasattr(app_instance, "room_entry")
+    assert not hasattr(app_instance, "chat_scope_seg")
     app_instance._add_chat_line({"player": "Bob", "text": "salut", "scope": "global", "room_id": None})
     app_instance._add_chat_line({"player": "Alice", "text": "dans le salon", "scope": "room", "room_id": "salon1"})
-    app_instance.current_room_id = "salon1"
-    app_instance.chat_scope_seg.set("Salon Courant")
-    assert [m["text"] for m in app_instance._visible_messages()] == ["dans le salon"]
+    assert [m["text"] for m in app_instance._visible_messages()] == ["salut"]
+
+    sent_resp = Message(type="CHAT", request_id=1, payload={"player": "Moi", "text": "hello", "scope": "global"})
+    app_instance.controller.chat = MagicMock(return_value=sent_resp)
+    app_instance.chat_entry.insert(0, "hello")
+    app_instance._send_chat_message()
+    app_instance.controller.chat.assert_called_once_with("hello", "global")
 
 
 @pytest.fixture
