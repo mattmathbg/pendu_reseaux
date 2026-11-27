@@ -279,7 +279,7 @@ def test_pushed_chat_during_request_is_stored_not_returned():
     response = client.request("LETTER", {"letter": "e"})
 
     assert response.type == "STATE"
-    assert client.inbox == [{"player": "Bob", "scope": "global", "text": "yo"}]
+    assert client.inbox == [{"type": "CHAT", "player": "Bob", "scope": "global", "text": "yo"}]
 
 
 def test_poll_reads_pushed_chat_without_any_request():
@@ -289,7 +289,7 @@ def test_poll_reads_pushed_chat_without_any_request():
         client.sock = a
         b.sendall(server_reply(0, "CHAT", player="Bob", scope="global", text="yo"))
         client.poll()
-        assert client.inbox == [{"player": "Bob", "scope": "global", "text": "yo"}]
+        assert client.inbox == [{"type": "CHAT", "player": "Bob", "scope": "global", "text": "yo"}]
     finally:
         a.close()
         b.close()
@@ -321,7 +321,7 @@ def test_poll_processes_message_already_in_framer():
         client.sock = a
         client.framer.feed(server_reply(0, "CHAT", player="Bob", scope="global", text="yo"))
         client.poll()    # aucune donnée sur la socket : le message est déjà dans le framer
-        assert client.inbox == [{"player": "Bob", "scope": "global", "text": "yo"}]
+        assert client.inbox == [{"type": "CHAT", "player": "Bob", "scope": "global", "text": "yo"}]
     finally:
         a.close()
         b.close()

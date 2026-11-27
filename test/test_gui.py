@@ -213,6 +213,10 @@ def test_key_press_handling(app_instance):
     event = MagicMock()
     event.char = "k"
     app_instance._on_key_press(event)
+    mock_play.assert_not_called()
+
+    app_instance._keys(state="normal")
+    app_instance._on_key_press(event)
     mock_play.assert_called_once_with("K")
 
 

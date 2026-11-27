@@ -235,11 +235,6 @@ class HangmanApp:
         self._mark_connected()
         self.client.save_session("session.json")
 
-        if self._do(self.controller.connect, endpoints, port, pseudo, title="Connexion impossible") is None:
-            return
-        self._mark_connected()
-        self.client.save_session("session.json")
-
 
     def resume_existing_session(self) -> None:
         port = self._read_port()

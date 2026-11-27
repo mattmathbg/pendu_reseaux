@@ -621,7 +621,7 @@ class Server:
 
     async def check_duel_forfeits(self, now: float | None = None) -> None:
         """Parcourt les duels en cours et envoie DUEL_END à ceux qui ont gagné par forfait."""
-        now = time.time() if now is None else now
+        now = time() if now is None else now
         for duel in list(self.duels.values()):
             absent_players = [
                 player for player in duel.players

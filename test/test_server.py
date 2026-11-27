@@ -893,3 +893,21 @@ async def test_disconnected_player_who_returns_in_time_keeps_duel():
     assert len(creator_messages) == 1
     assert creator_messages[0].type == "DUEL_STATE"
     assert srv.duels[duel_id].status == "EN_COURS"
+
+
+async def test_check_duel_forfeits_without_now_uses_current_time(monkeypatch):
+    srv = Server(port=0)
+    alice, alice_w = await _duel_player(srv, "Alice")
+    bob, _ = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+
+    bob.handle_disconnect()
+    monkeypatch.setattr("server.server.time", lambda: bob.disconnect_timestamp + 61)
+
+    await srv.check_duel_forfeits()
+
+    end_msgs = [m for m in alice_w.messages() if m.type == "DUEL_END"]
+    assert len(end_msgs) == 1
+    assert end_msgs[0].payload["winner"] == "Alice"
+    assert end_msgs[0].payload["reason"] == "forfait"
