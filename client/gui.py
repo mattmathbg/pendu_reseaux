@@ -61,6 +61,7 @@ class HangmanApp:
         self._timer_started_at: float | None = None
         self._timer_after_id: str | None = None
         self.chat_history: list[dict] = []
+        self._duel_id: str | None = None
 
         self.host_var = tk.StringVar(value=self.client.host)
         self.port_var = tk.StringVar(value=str(self.client.port))
@@ -74,6 +75,7 @@ class HangmanApp:
         self.lives_var = tk.StringVar(value="❤️ 6 / 6")
         self.errors_var = tk.StringVar(value="💀 0 / 6")
         self.hangman_var = tk.StringVar(value=HANGMAN_STAGES[0])
+        self.room_var = tk.StringVar(value="Aucun duel en cours")
 
         self.root.title("Pendu Réseau")
         self.root.geometry("900x720")
@@ -104,23 +106,30 @@ class HangmanApp:
             game, chat, log = (self.tabview.add(name) for name in ("Jeu", "Chat", "Réseau"))
 
             # Onglet Jeu
-            _w(ctk.CTkLabel, game, {"pady": 4}, textvariable=self.hangman_var, font=(MONO, 14), justify="left")
-            _w(ctk.CTkLabel, game, {}, textvariable=self.word_var, font=(MONO, 32, "bold"))
+            self.hangman_label = _w(ctk.CTkLabel, game, {"pady": 4}, textvariable=self.hangman_var, font=(MONO, 14), justify="left")
+            self.word_label = _w(ctk.CTkLabel, game, {}, textvariable=self.word_var, font=(MONO, 32, "bold"))
             _w(ctk.CTkLabel, game, {"pady": 2}, textvariable=self.theme_var, font=(MONO, 13, "bold"), text_color="#38BDF8")
             stats = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
             for var in (self.timer_var, self.lives_var, self.errors_var):
                 _w(ctk.CTkLabel, stats, {"side": "left", "padx": 10}, textvariable=var)
             _w(ctk.CTkLabel, game, {}, textvariable=self.info_var)
-            keys = _w(ctk.CTkFrame, game, {"pady": 6}, fg_color="transparent")
+            self.keys_frame = _w(ctk.CTkFrame, game, {"pady": 6}, fg_color="transparent")
             self.buttons: dict[str, ctk.CTkButton] = {}
             for i, letter in enumerate(ascii_uppercase):
-                self.buttons[letter] = ctk.CTkButton(keys, text=letter, width=40, command=lambda l=letter: self.play(l))
+                self.buttons[letter] = ctk.CTkButton(self.keys_frame, text=letter, width=40, command=lambda l=letter: self.play(l))
                 self.buttons[letter].grid(row=i // 9, column=i % 9, padx=2, pady=2)
-            actions = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
-            _w(ctk.CTkLabel, actions, text="Catégorie :")
-            self.category_menu = _w(ctk.CTkOptionMenu, actions, variable=self.category_var, values=list(CATEGORIES.values()), width=190)
-            self.new_game_btn = _w(ctk.CTkButton, actions, text="Nouvelle manche", command=self.start_new_game)
-            self.quit_btn = _w(ctk.CTkButton, actions, text="Abandonner", command=self.quit_game)
+            self.actions_frame = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
+            _w(ctk.CTkLabel, self.actions_frame, text="Catégorie :")
+            self.category_menu = _w(ctk.CTkOptionMenu, self.actions_frame, variable=self.category_var, values=list(CATEGORIES.values()), width=190)
+            self.new_game_btn = _w(ctk.CTkButton, self.actions_frame, text="Nouvelle manche", command=self.start_new_game)
+            self.quit_btn = _w(ctk.CTkButton, self.actions_frame, text="Abandonner", command=self.quit_game)
+            duel_row = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
+            _w(ctk.CTkButton, duel_row, text="Créer un duel", command=self._create_duel_action)
+            self.duel_entry = _w(ctk.CTkEntry, duel_row, width=180, placeholder_text="Code du duel (3-12 lettres)")
+            _w(ctk.CTkButton, duel_row, text="Rejoindre", command=self._join_duel_action)
+            _w(ctk.CTkLabel, game, {"pady": 2}, textvariable=self.room_var, text_color="#9CA3AF")
+            self.board = _w(ctk.CTkFrame, game, {"fill": "both", "expand": True}, fg_color="transparent")
+            
 
             # Onglet Chat (global uniquement)
             self.chat_box = _w(ctk.CTkTextbox, chat, {"fill": "both", "expand": True, "pady": 4}, state="disabled")
@@ -133,6 +142,18 @@ class HangmanApp:
             # Onglet Réseau (inspecteur de trames)
             _w(ctk.CTkButton, log, {"anchor": "e"}, text="Effacer", width=80, command=self._clear_logs)
             self.log_text = _w(ctk.CTkTextbox, log, {"fill": "both", "expand": True}, font=(MONO, 12))
+            self.hangman_label.pack_forget()
+            self.keys_frame.pack_forget()
+            self.board.pack_forget()
+            self._keys(state="disabled")
+
+    def _show_game_widgets(self) -> None:
+        self.hangman_label.pack(pady=4, before=self.word_label)
+        self.keys_frame.pack(pady=6, before=self.actions_frame)
+
+    def _hide_game_widgets(self) -> None:
+        self.hangman_label.pack_forget()
+        self.keys_frame.pack_forget()
 
     # --- STATUT, SESSION ---
 
@@ -204,19 +225,21 @@ class HangmanApp:
             resp = self._do(self.controller.resume, endpoints, port, title="Reprise impossible")
             if resp is not None:
                 self._mark_connected()
-                if resp.payload.get("status") == "IDLE":
-                    self.start_new_game()
-                else:
+                if resp.payload.get("status") != "IDLE":
                     self.update_from_state(resp)
                 return
-            # Session expirée ou refusée : on repart sur une nouvelle partie
             self.client.close()
 
         if self._do(self.controller.connect, endpoints, port, pseudo, title="Connexion impossible") is None:
             return
         self._mark_connected()
         self.client.save_session("session.json")
-        self.start_new_game()
+
+        if self._do(self.controller.connect, endpoints, port, pseudo, title="Connexion impossible") is None:
+            return
+        self._mark_connected()
+        self.client.save_session("session.json")
+
 
     def resume_existing_session(self) -> None:
         port = self._read_port()
@@ -285,7 +308,6 @@ class HangmanApp:
             self.client.close()
             self._login()
             return
-        self._keys(state="normal", fg_color=THEME["key"])
         cat_id = self._get_selected_category_id()
         resp = self._do(self.controller.new_game, cat_id)
         if resp is not None:
@@ -293,7 +315,11 @@ class HangmanApp:
 
     def play(self, letter: str) -> None:
         resp = self._do(self.controller.guess, letter.upper())
-        if resp is not None:
+        if resp is not None and resp.type in ("DUEL", "DUEL_END"):
+            self._show_duel(resp.payload)
+            if resp.type == "DUEL_END":
+                messagebox.showinfo("Fin du duel", f"Vainqueur : {resp.payload.get('winner') or 'personne'}")
+        elif resp is not None:
             self.update_from_state(resp)
 
     def quit_game(self) -> None:
@@ -305,6 +331,8 @@ class HangmanApp:
         self._status("Session clôturée")
         self.info_var.set("Partie abandonnée.")
         self._keys(state="disabled")
+        self._hide_game_widgets()
+        self.board.pack_forget()
         self._set_new_game_enabled(True)
 
     def _apply_state_payload(self, p: dict) -> str | None:
@@ -330,7 +358,13 @@ class HangmanApp:
 
     def update_from_state(self, resp) -> None:
         p = resp.payload
+        if p.get("status") == "EN_COURS":
+            self._keys(state="normal", fg_color=THEME["key"])
         status = self._apply_state_payload(p)
+        if status == "EN_COURS":
+            self._show_game_widgets()
+        else:
+            self._hide_game_widgets()
         self._set_new_game_enabled(status != "EN_COURS")
         if status == "EN_COURS" and self._timer_started_at is None:
             self._start_timer()
@@ -343,6 +377,7 @@ class HangmanApp:
             self._apply_state_payload(p)
         elapsed = self._stop_timer()
         self._keys(state="disabled")
+        self._hide_game_widgets()
         self._set_new_game_enabled(True)
         self.info_var.set(END_MESSAGES["PERDU"])
         details = p.get("message") or "Délai maximal dépassé : la partie est perdue."
@@ -362,6 +397,7 @@ class HangmanApp:
     def _end_game(self, p: dict, status: str) -> None:
         elapsed = self._stop_timer()
         self._keys(state="disabled")
+        self._hide_game_widgets()
         text = END_MESSAGES[status] + (f"\n\n⏱ Temps écoulé : {elapsed}" if elapsed else "")
         if status == "PERDU" and p.get("secret_word"):
             text += f"\n\n📖 Le mot était : {p['secret_word']}"
@@ -371,6 +407,9 @@ class HangmanApp:
     def _keys(self, **config) -> None:
         for button in self.buttons.values():
             button.configure(**config)
+
+    def _disable_key(self, letter: str, fg: str, text: str) -> None:
+        self.buttons[letter].configure(state="disabled", fg_color=fg, text_color=text)
 
     def _show_hangman(self, errors_made: int, status: str | None = None) -> None:
         text = HANGMAN_STAGES[min(errors_made, len(HANGMAN_STAGES) - 1)]
@@ -470,11 +509,15 @@ class HangmanApp:
         """Relit le réseau sans bloquer (chat en direct), puis se reprogramme."""
         try:
             for message in self.controller.poll():
-                self._add_chat_line(message)
+                if message.get("type") in ("DUEL_STATE", "DUEL_END"):
+                    self._show_duel(message)
+                    if message["type"] == "DUEL_END":
+                        messagebox.showinfo("Fin du duel", f"Vainqueur : {message.get('winner') or 'personne'}")
+                else:
+                    self._add_chat_line(message)
         except (ConnectionError, OSError):
-            self.client.close()
-            self._status("Déconnecté")
-            self._set_new_game_enabled(True)
+                    self.client.close()
+                    self._status("Déconnecté")
         self.root.after(200, self._refresh)
 
     def _on_close(self) -> None:
@@ -482,6 +525,96 @@ class HangmanApp:
             self.client.save_session("session.json")   # met à jour last_seen
         self.client.close()
         self.root.destroy()
+
+    def _create_duel_action(self) -> None:
+        duel_id = self.duel_entry.get().strip().upper()
+        if not duel_id:
+            messagebox.showwarning("Créer un duel", "Choisissez un code de 3 à 12 lettres.")
+            return
+        if not duel_id.isascii() or not duel_id.isalpha() or not 3 <= len(duel_id) <= 12:
+            messagebox.showwarning("Créer un duel", "Le code doit contenir uniquement 3 à 12 lettres A-Z.")
+            return
+
+        resp = self._do(self.controller.create_duel, duel_id, title="Duel")
+        if resp is None:
+            return
+        if resp.type != "DUEL":
+            messagebox.showwarning("Duel", "Réponse inattendue du serveur lors de la création du duel.")
+            return
+        server_duel_id = resp.payload.get("duel_id")
+        if server_duel_id != duel_id:
+            messagebox.showerror(
+                "Serveur à mettre à jour",
+                "Le serveur actif n'a pas pris en compte le code choisi. "
+                "Ne partage pas l'autre code affiché par le serveur. "
+                "Avec Docker, exécute `docker compose up -d --build`. "
+                "Sinon, redémarre le serveur. Reconnecte-toi, puis recrée le duel.",
+            )
+            return
+        self._duel_id = duel_id
+        self._show_duel(resp.payload)
+        messagebox.showinfo("Duel créé", f"Duel créé avec le code :\n\n{self._duel_id}\n\nVotre adversaire doit saisir ce même code.")
+
+    def _join_duel_action(self) -> None:
+        duel_id = self.duel_entry.get().strip().upper()
+        if not duel_id:
+            messagebox.showwarning(
+                "Rejoindre un duel",
+                "Saisissez le même code que celui choisi sur le client qui a créé le duel.",
+            )
+            return
+        resp = self._do(self.controller.join_duel, duel_id, title="Duel")
+        if resp is None:
+            return
+        if resp.type != "DUEL":
+            messagebox.showwarning("Duel", "Réponse inattendue du serveur lors de la connexion au duel.")
+            return
+        self._duel_id = duel_id
+        self._show_duel(resp.payload)
+        messagebox.showinfo("Duel rejoint", "Vous avez rejoint la partie !")
+
+    def _show_duel(self, p: dict) -> None:
+        status = p.get("status", "INCONNU")
+        players = " vs ".join(p.get("players", [])) or "Joueurs en attente"
+        turn = p.get("turn")
+        duel_id = p.get("duel_id", self._duel_id)
+        if status == "EN_ATTENTE":
+            self.room_var.set(f"Duel créé | Code : {duel_id} | En attente d'un adversaire")
+        else:
+            self.room_var.set(f"Duel {status} | Code : {duel_id} | {players} | Tour : {turn or '-'}")
+        self.word_var.set("  ".join(p.get("masked_word", "").replace(" ", "")))
+
+        max_errors = p.get("max_errors", 6)
+        errors_left = p.get("errors_left", max_errors)
+        made = max(0, max_errors - errors_left)
+        self.errors_var.set(f"💀 {made} / {max_errors}")
+        self.lives_var.set(f"❤️ {errors_left} / {max_errors}")
+        self._show_hangman(made, status if status == "TERMINE" else None)
+
+        if p.get("duel_id"):
+            self._duel_id = p["duel_id"]
+        if status == "EN_COURS":
+            self._show_game_widgets()
+            self._keys(state="disabled", fg_color=THEME["key"])
+            if turn == self.client.player_name:
+                self._keys(state="normal")
+            if self._timer_started_at is None:
+                self._start_timer()
+        else:
+            self._hide_game_widgets()
+            self._keys(state="disabled")
+            if self._timer_started_at is not None:
+                self._stop_timer()
+
+        for letter in p.get("used_letters", []):
+            key = letter.upper()
+            if key in self.buttons:
+                color = THEME["ok"] if key in p.get("masked_word", "").upper() else THEME["bad"]
+                self._disable_key(key, color, "#FFFFFF")
+
+        self._set_new_game_enabled(status not in ("EN_ATTENTE", "EN_COURS"))
+        if status == "TERMINE":
+            self._duel_id = None
 
 
 def main() -> None:

@@ -29,6 +29,7 @@ class GameSession:
           self.room_id = None
           self.move_timeout = move_timeout
           self.last_move_timestamp = None
+          self.duel = None
      
      def handle_disconnect(self) -> None:
           """

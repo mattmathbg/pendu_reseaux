@@ -2,7 +2,9 @@ import argparse
 import asyncio
 from csv import writer
 import random
+from time import time
 from typing import Any
+import uuid
 
 
 from core import pendu
@@ -28,6 +30,8 @@ from core.words import get_word_from_api
 import os
 import ssl
 from pathlib import Path
+
+from server.duel import Duel, DuelError, FORFAIT_DELAY
 
 def create_server_ssl_context(cert_dir: str = "certs") -> ssl.SSLContext:
     path = Path(cert_dir)
@@ -67,6 +71,7 @@ class Server:
         self.port = port
         self.sessions = SessionManager(timeout=60)
         self.dispatcher = MessageDispatcher()
+        self.duels: dict[str, Duel] = {}
         self.use_tls = use_tls  # Indique si le serveur doit utiliser TLS/SSL
         self.server_name = server_name
         self.enable_discovery = enable_discovery
@@ -96,6 +101,8 @@ class Server:
         self.dispatcher.register("JOIN_ROOM")(self._handle_join_room)
         self.dispatcher.register("LEAVE_ROOM")(self._handle_leave_room)
         self.dispatcher.register("CHAT")(self._handle_chat)
+        self.dispatcher.register("CREATE_DUEL")(self._handle_create_duel)
+        self.dispatcher.register("JOIN_DUEL")(self._handle_join_duel)
 
     async def send_message(self, writer: asyncio.StreamWriter, msg: Message) -> None:
         """Sérialise, encadre avec \\n et envoie le message."""
@@ -174,7 +181,19 @@ class Server:
         finally:
             if current_session is not None and current_session.owner is writer:
                 current_session.handle_disconnect()
-                print(f"[SERVEUR] [SESSION] Session {current_session.session_id} suspendue (en attente de RESUME sous 60s).")
+                duel = current_session.duel
+                duel_state = f"{duel.duel_id} ({duel.status})" if duel else "aucun"
+                print(
+                    f"[SERVEUR] [SESSION] Session {current_session.session_id} "
+                    f"joueur={current_session.player_name} duel={duel_state} "
+                    "suspendue (en attente de RESUME sous 60s)."
+                )
+                if duel is not None and duel.status == "EN_COURS":
+                    asyncio.create_task(
+                        self._forfeit_after_disconnect(
+                            duel, current_session, current_session.disconnect_timestamp
+                        )
+                    )
             writer.close()
             await writer.wait_closed()
 
@@ -317,6 +336,8 @@ class Server:
         return self._build_state_message(msg.request_id, session)
 
     async def _handle_letter(self, msg: Message, session: GameSession) -> Message:
+        if session.duel is not None:
+            return await self._handle_duel_letter(msg, session)
         if session.game is None:
             return Message(
                 type="ERROR",
@@ -401,10 +422,11 @@ class Server:
         )
 
     async def _cleanup_loop(self) -> None:
-        """Tâche de fond qui nettoie périodiquement les sessions expirées."""
+        """Tâche de fond qui nettoie périodiquement les sessions expirées et vérifie les forfaits de duel."""
         while True:
             await asyncio.sleep(10)
             self.sessions.clean_expired_sessions()
+            await self.check_duel_forfeits()
 
     async def start(self) -> None:
         """Démarre le serveur TCP asynchrone et le répondeur de découverte."""
@@ -518,6 +540,127 @@ class Server:
             session_id=session.session_id,
             payload=push.payload,
         )
+    
+    async def _handle_create_duel(self, msg: Message, session: GameSession) -> Message:
+        if session.duel is not None:
+            return self._duel_error("INVALID_STATE", "Vous êtes déjà dans un duel.", msg, session)
+        requested_id = msg.payload.get("duel_id")
+        if requested_id is None:
+            duel_id = uuid.uuid4().hex[:8].upper()
+        elif (
+            not isinstance(requested_id, str)
+            or not requested_id.isascii()
+            or not requested_id.isalpha()
+            or not 3 <= len(requested_id.strip()) <= 12
+        ):
+            return self._duel_error(
+                "INVALID_DUEL_ID", "Le code doit contenir uniquement 3 à 12 lettres A-Z.", msg, session
+            )
+        else:
+            duel_id = requested_id.strip().upper()
+            if duel_id in self.duels:
+                return self._duel_error("DUEL_EXISTS", "Ce code de duel est déjà utilisé.", msg, session)
+        word, _theme = await asyncio.to_thread(get_word_from_api)
+        duel = Duel(duel_id, creator=session, secret_word=word)
+        self.duels[duel_id] = duel
+        session.duel = duel
+        return self._duel_message("DUEL", msg.request_id, session, duel)
+
+    def _duel_message(self, msg_type: str, request_id: int, session: GameSession, duel: Duel) -> Message:
+        return Message(type=msg_type, request_id=request_id,
+                       session_id=session.session_id, payload=duel.to_payload())
+
+    def _duel_error(self, code: str, text: str, msg: Message, session: GameSession) -> Message:
+        return Message(type="ERROR", request_id=msg.request_id, session_id=session.session_id,
+                       payload={"code": code, "message": text})
+
+    async def _handle_join_duel(self, msg: Message, session: GameSession) -> Message:
+        if session.duel is not None:
+            return self._duel_error("INVALID_STATE", "Vous êtes déjà dans un duel.", msg, session)
+        requested_id = msg.payload.get("duel_id", "")
+        duel_id = requested_id.strip().upper() if isinstance(requested_id, str) else ""
+        duel = self.duels.get(duel_id)
+        if duel is None:
+            return self._duel_error("UNKNOWN_SESSION", "Duel inconnu.", msg, session)
+        try:
+            duel.add_player(session)
+        except DuelError as exc:
+            return self._duel_error(exc.code, exc.message, msg, session)
+        session.duel = duel
+        state_payload = duel.to_payload()
+        for player in duel.players:
+            if player is not session:
+                await self._push(
+                    player,
+                    Message(type="DUEL_STATE", request_id=0, payload=state_payload),
+                )
+        return self._duel_message("DUEL", msg.request_id, session, duel)
+
+    async def _handle_duel_letter(self, msg: Message, session: GameSession) -> Message:
+        duel = session.duel
+        try:
+            duel.play(session, msg.payload.get("letter", ""))
+        except DuelError as exc:
+            return self._duel_error(exc.code, exc.message, msg, session)
+
+        if duel.status == "TERMINE":
+            end_payload = duel.to_payload()
+            for other in duel.players:
+                if other is not session:
+                    await self._push(other, Message(type="DUEL_END", request_id=0, payload=end_payload))
+            response = Message(type="DUEL_END", request_id=msg.request_id,
+                               session_id=session.session_id, payload=end_payload)
+            self._end_duel(duel)
+            return response
+
+        state_payload = duel.to_payload()
+        for other in duel.players:
+            if other is not session:
+                await self._push(other, Message(type="DUEL_STATE", request_id=0, payload=state_payload))
+        return self._duel_message("DUEL", msg.request_id, session, duel)
+
+    async def check_duel_forfeits(self, now: float | None = None) -> None:
+        """Parcourt les duels en cours et envoie DUEL_END à ceux qui ont gagné par forfait."""
+        now = time.time() if now is None else now
+        for duel in list(self.duels.values()):
+            absent_players = [
+                player for player in duel.players
+                if not player.is_connected and player.disconnect_timestamp is not None
+            ]
+            for player in absent_players:
+                absent_for = now - player.disconnect_timestamp
+                print(
+                    f"[DUEL] Contrôle forfait duel={duel.duel_id} statut={duel.status} "
+                    f"joueur_absent={player.player_name} depuis={absent_for:.1f}s"
+                )
+            if duel.forfeit_if_absent(now):
+                end = Message(type="DUEL_END", request_id=0, payload=duel.to_payload())
+                for player in duel.players:
+                    if player.owner is not None and player.is_connected:
+                        await self._push(player, end)
+                print(
+                    f"[DUEL] Forfait déclaré duel={duel.duel_id} "
+                    f"vainqueur={duel.winner or 'personne'}"
+                )
+                self._end_duel(duel)
+
+    async def _forfeit_after_disconnect(
+        self, duel: Duel, session: GameSession, disconnect_timestamp: float
+    ) -> None:
+        await asyncio.sleep(FORFAIT_DELAY)
+        if (
+            self.duels.get(duel.duel_id) is not duel
+            or session.duel is not duel
+            or session.is_connected
+            or session.disconnect_timestamp != disconnect_timestamp
+        ):
+            return
+        await self.check_duel_forfeits(now=time())
+
+    def _end_duel(self, duel: Duel) -> None:
+        for player in duel.players:
+            player.duel = None
+        self.duels.pop(duel.duel_id, None)
 
 
      

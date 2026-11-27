@@ -646,3 +646,250 @@ async def test_new_game_in_progress_does_not_call_api_or_overwrite_theme(monkeyp
     assert resp.payload["code"] == "INVALID_STATE"
     assert called == []
     assert session.theme == "Animaux"
+
+
+
+
+async def _duel_player(srv, name):
+    session, writer = _player(srv, name)
+    return session, writer
+
+
+async def _join_duel(srv, session, duel_id):
+    response, _ = await srv._dispatch_message(
+        Message(type="JOIN_DUEL", request_id=2, session_id=session.session_id,
+                payload={"duel_id": duel_id}), session)
+    return response
+
+
+async def _create_duel(srv, session, duel_id=None):
+    response, _ = await srv._dispatch_message(
+        Message(type="CREATE_DUEL", request_id=1, session_id=session.session_id,
+                payload={"duel_id": duel_id} if duel_id is not None else {}), session)
+    assert response.type == "DUEL"
+    return response.payload["duel_id"]
+
+
+async def test_create_duel_waits_for_second_player():
+    srv = Server(port=0)
+    alice, _ = await _duel_player(srv, "Alice")
+    response, _ = await srv._dispatch_message(
+        Message(type="CREATE_DUEL", request_id=1, session_id=alice.session_id), alice)
+    assert response.type == "DUEL"
+    assert response.payload["status"] == "EN_ATTENTE"
+    assert response.payload["players"] == ["Alice"]
+
+
+async def test_create_duel_uses_custom_letter_code():
+    srv = Server(port=0)
+    alice, _ = await _duel_player(srv, "Alice")
+    bob, _ = await _duel_player(srv, "Bob")
+
+    duel_id = await _create_duel(srv, alice, "amis")
+    response = await _join_duel(srv, bob, "amis")
+
+    assert duel_id == "AMIS"
+    assert response.type == "DUEL"
+    assert response.payload["status"] == "EN_COURS"
+
+
+async def test_create_duel_rejects_duplicate_custom_code():
+    srv = Server(port=0)
+    alice, _ = await _duel_player(srv, "Alice")
+    bob, _ = await _duel_player(srv, "Bob")
+    await _create_duel(srv, alice, "AMIS")
+
+    response, _ = await srv._dispatch_message(
+        Message(type="CREATE_DUEL", request_id=2, session_id=bob.session_id,
+                payload={"duel_id": "amis"}), bob)
+
+    assert response.type == "ERROR"
+    assert response.payload["code"] == "DUEL_EXISTS"
+
+
+async def test_join_starts_duel_and_gives_first_turn_to_creator():
+    srv = Server(port=0)
+    alice, alice_w = await _duel_player(srv, "Alice")
+    bob, _ = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+
+    response = await _join_duel(srv, bob, duel_id)
+
+    assert response.payload["status"] == "EN_COURS"
+    assert response.payload["players"] == ["Alice", "Bob"]
+    assert response.payload["turn"] == "Alice"
+    pushed = alice_w.messages()
+    assert len(pushed) == 1
+    assert pushed[0].type == "DUEL_STATE"
+    assert pushed[0].payload["status"] == "EN_COURS"
+    assert pushed[0].payload["turn"] == "Alice"
+
+
+async def test_third_player_is_refused():
+    srv = Server(port=0)
+    alice, _ = await _duel_player(srv, "Alice")
+    bob, _ = await _duel_player(srv, "Bob")
+    carol, _ = await _duel_player(srv, "Carol")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+
+    response = await _join_duel(srv, carol, duel_id)
+
+    assert response.type == "ERROR"
+    assert response.payload["code"] == "INVALID_STATE"
+
+
+async def test_letter_out_of_turn_is_refused():
+    srv = Server(port=0)
+    alice, _ = await _duel_player(srv, "Alice")
+    bob, bob_w = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+
+    response, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=3, session_id=bob.session_id,
+                payload={"letter": "p"}), bob)
+
+    assert response.payload["code"] == "NOT_YOUR_TURN"
+
+
+async def test_turn_alternates_and_state_is_pushed_to_other_player():
+    srv = Server(port=0)
+    alice, alice_w = await _duel_player(srv, "Alice")
+    bob, bob_w = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+
+    response, _ = await srv._dispatch_message(
+        Message(type="LETTER", request_id=3, session_id=alice.session_id,
+                payload={"letter": "p"}), alice)
+
+    assert response.payload["turn"] == "Bob"
+    pushed = bob_w.messages()
+    assert len(pushed) == 1
+    assert pushed[0].type == "DUEL_STATE"
+    assert pushed[0].request_id == 0
+    creator_messages = alice_w.messages()
+    assert len(creator_messages) == 1
+    assert creator_messages[0].type == "DUEL_STATE"
+    assert creator_messages[0].payload["status"] == "EN_COURS"
+
+
+async def test_player_who_finds_last_letter_wins(monkeypatch):
+    monkeypatch.setattr("server.server.get_word_from_api", lambda *a: ("PYTHON", "Test"))
+    srv = Server(port=0)
+    alice, alice_w = await _duel_player(srv, "Alice")
+    bob, bob_w = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+    # Ordre de tour : Alice, Bob, Alice... ; Alice trouve la dernière lettre
+    sequence = [(alice, "p"), (bob, "x"), (alice, "y"), (bob, "z"),
+                (alice, "t"), (bob, "q"), (alice, "h"), (bob, "w"), (alice, "o"), (bob, "k"), (alice, "n")]
+    for i, (player, letter) in enumerate(sequence):
+        await srv._dispatch_message(
+            Message(type="LETTER", request_id=3 + i, session_id=player.session_id,
+                    payload={"letter": letter}), player)
+
+    end_msgs = [m for m in bob_w.messages() if m.type == "DUEL_END"]
+    assert end_msgs[0].payload["winner"] == "Alice"
+
+
+async def test_disconnected_player_forfeits_after_60_seconds():
+    srv = Server(port=0)
+    alice, alice_w = await _duel_player(srv, "Alice")
+    bob, bob_w = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+
+    bob.handle_disconnect()
+    await srv.check_duel_forfeits(now=bob.disconnect_timestamp + 61)
+
+    end_msgs = [m for m in alice_w.messages() if m.type == "DUEL_END"]
+    assert end_msgs[0].payload["winner"] == "Alice"
+    assert end_msgs[0].payload["reason"] == "forfait"
+    assert duel_id not in srv.duels
+    assert alice.duel is None
+    assert bob.duel is None
+
+
+async def test_disconnect_timer_forfeits_after_grace_period(monkeypatch):
+    srv = Server(port=0)
+    alice, alice_w = await _duel_player(srv, "Alice")
+    bob, _ = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+    bob.handle_disconnect()
+    disconnected_at = bob.disconnect_timestamp
+
+    async def skip_delay(_seconds):
+        pass
+
+    monkeypatch.setattr("server.server.asyncio.sleep", skip_delay)
+    monkeypatch.setattr("server.server.time", lambda: disconnected_at + 61)
+
+    await srv._forfeit_after_disconnect(srv.duels[duel_id], bob, disconnected_at)
+
+    end_msgs = [message for message in alice_w.messages() if message.type == "DUEL_END"]
+    assert end_msgs[0].payload["winner"] == "Alice"
+    assert end_msgs[0].payload["reason"] == "forfait"
+    assert duel_id not in srv.duels
+
+
+async def test_disconnect_timer_does_not_forfeit_resumed_player(monkeypatch):
+    srv = Server(port=0)
+    alice, alice_w = await _duel_player(srv, "Alice")
+    bob, _ = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+    bob.handle_disconnect()
+    disconnected_at = bob.disconnect_timestamp
+
+    async def resume_during_delay(_seconds):
+        bob.reconnect(bob.auth_token)
+
+    monkeypatch.setattr("server.server.asyncio.sleep", resume_during_delay)
+    monkeypatch.setattr("server.server.time", lambda: disconnected_at + 61)
+
+    await srv._forfeit_after_disconnect(srv.duels[duel_id], bob, disconnected_at)
+
+    assert srv.duels[duel_id].status == "EN_COURS"
+    assert not [message for message in alice_w.messages() if message.type == "DUEL_END"]
+
+
+async def test_cleanup_loop_awaits_duel_forfeit_check(monkeypatch):
+    srv = Server(port=0)
+    checks = []
+    sleep_calls = 0
+
+    async def check_forfeits():
+        checks.append(True)
+
+    async def stop_loop(_delay):
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(srv, "check_duel_forfeits", check_forfeits)
+    monkeypatch.setattr("server.server.asyncio.sleep", stop_loop)
+
+    with pytest.raises(asyncio.CancelledError):
+        await srv._cleanup_loop()
+
+    assert checks == [True]
+
+
+async def test_disconnected_player_who_returns_in_time_keeps_duel():
+    srv = Server(port=0)
+    alice, alice_w = await _duel_player(srv, "Alice")
+    bob, _ = await _duel_player(srv, "Bob")
+    duel_id = await _create_duel(srv, alice)
+    await _join_duel(srv, bob, duel_id)
+
+    bob.handle_disconnect()
+    await srv.check_duel_forfeits(now=bob.disconnect_timestamp + 30)
+
+    creator_messages = alice_w.messages()
+    assert len(creator_messages) == 1
+    assert creator_messages[0].type == "DUEL_STATE"
+    assert srv.duels[duel_id].status == "EN_COURS"

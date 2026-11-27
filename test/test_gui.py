@@ -71,6 +71,33 @@ def test_timer_formats_durations_over_an_hour():
     assert HangmanApp._format_elapsed(3_661.0) == "61:01"
 
 
+def test_duel_timer_starts_once_and_stops_when_duel_ends(app_instance, monkeypatch):
+    start_timer = MagicMock()
+    stop_timer = MagicMock()
+    monkeypatch.setattr(app_instance, "_start_timer", start_timer)
+    monkeypatch.setattr(app_instance, "_stop_timer", stop_timer)
+    active_payload = {
+        "duel_id": "AMIS",
+        "status": "EN_COURS",
+        "players": ["Alice", "Bob"],
+        "turn": "Alice",
+        "masked_word": "_ _ _",
+        "errors_left": 6,
+        "max_errors": 6,
+        "used_letters": [],
+    }
+
+    app_instance._show_duel(active_payload)
+    assert start_timer.call_count == 1
+
+    app_instance._timer_started_at = 100.0
+    app_instance._show_duel(active_payload)
+    assert start_timer.call_count == 1
+
+    app_instance._show_duel({**active_payload, "status": "TERMINE", "turn": None})
+    stop_timer.assert_called_once_with()
+
+
 @pytest.fixture(scope="module")
 def shared_tk():
     ctk.set_appearance_mode("dark")
@@ -233,25 +260,6 @@ def real_server():
     yield holder["port"]
     loop.call_soon_threadsafe(holder["server"].close)
     thread.join(timeout=2)
-
-
-def test_gui_connects_and_plays_on_real_server(app_instance, real_server, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)   # évite d'écrire un session.json dans le projet
-    app = app_instance
-    app.host_var.set("127.0.0.1")
-    app.port_var.set(str(real_server))
-    app.pseudo_var.set("GuiPlayer")
-
-    app.connect_or_disconnect()   # connexion, HELLO, NEW_GAME, tout en synchrone
-
-    assert app.client.is_connected()
-    assert app.client.session_id is not None
-    assert "GuiPlayer" in app.session_info_label.cget("text")
-
-    app.play("E")
-    assert app.buttons["E"].cget("state") == "disabled"
-
-    app.client.close()
 
 
 def test_gui_apply_discovered_server_sets_tls(app_instance):

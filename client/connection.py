@@ -305,8 +305,8 @@ class GameClient:
 
         Renvoie True si le message a été rangé (c'est un push), False sinon.
         """
-        if msg.type == "CHAT" and msg.request_id == 0:
-            self.inbox.append(msg.payload)
+        if msg.request_id == 0 and msg.type in ("CHAT", "DUEL_STATE", "DUEL_END"):
+            self.inbox.append({"type": msg.type, **msg.payload})
             return True
         return False
 
@@ -381,6 +381,15 @@ class GameClient:
         """Quitte le salon courant. Renvoie ROOM (room_id = None) ou ERROR."""
         return self.request("LEAVE_ROOM")
 
+
+    def create_duel(self, duel_id: str | None = None) -> Message:
+        """Crée un duel et attend un second joueur. Renvoie DUEL (status EN_ATTENTE)."""
+        payload = {"duel_id": duel_id} if duel_id is not None else {}
+        return self.request("CREATE_DUEL", payload)
+
+    def join_duel(self, duel_id: str) -> Message:
+        """Rejoint un duel existant. Renvoie DUEL (status EN_COURS)."""
+        return self.request("JOIN_DUEL", {"duel_id": duel_id})
 
     
 

@@ -51,3 +51,9 @@ class GameController:
         if not self.client.is_connected():
             self.client.connect()
         return self.client.resume()
+
+    def create_duel(self, duel_id: str | None = None) -> Message:
+        return self.client.create_duel(duel_id)
+
+    def join_duel(self, duel_id: str) -> Message:
+        return self.client.join_duel(duel_id)
