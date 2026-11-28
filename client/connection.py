@@ -29,6 +29,7 @@ def connect_to_server(endpoints: list[dict], port: int, timeout: float = 5.0) ->
     raise ConnectionError(f"Aucun point d'accès joignable : {last_error}")
 
 def create_client_ssl_context(ca_cert_path: str = "certs/server.crt") -> ssl.SSLContext:
+    """Construit le contexte TLS approuvé par le certificat du serveur."""
     target_path = Path(ca_cert_path)
     if not target_path.exists():
         if hasattr(sys, "_MEIPASS"):
@@ -58,9 +59,10 @@ class GameClient:
     - Établir et maintenir la connexion TCP (IPv4 / IPv6).
     - Encadrer (framing) et sérialiser les messages JSON via StreamFramer.
     - Gérer le cycle de vie de session (HELLO, NEW_GAME, RESUME, QUIT).
-    - Assurer la tolérance aux pannes avec retry_last et reconnexion automatique (idempotence).
+    - Assurer la tolérance aux pannes avec retry_last (idempotence).
     """
     def __init__(self, host: str = "127.0.0.1", port: int = 8888, timeout: float = 5.0, use_tls: bool = False) -> None:
+        """Initialise les paramètres réseau, le protocole et l'état de session du client."""
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -77,6 +79,7 @@ class GameClient:
         self.endpoints: list[dict] = [] 
 
     def _log(self, direction: str, text: str) -> None:
+        """Transmet un événement réseau au callback d'affichage s'il existe."""
         if self.log_callback:
             self.log_callback(direction, text)
 
@@ -185,6 +188,7 @@ class GameClient:
 
 
     def _read_sessions(self, filepath: str = "session.json") -> dict:
+        """Charge les sessions enregistrées et ignore les entrées invalides."""
         if not os.path.exists(filepath):
             return {}
         try:
@@ -204,6 +208,7 @@ class GameClient:
             return {}
 
     def _write_sessions(self, sessions: dict, filepath: str = "session.json") -> None:
+        """Écrit les sessions dans le fichier ou supprime ce fichier si elles sont vides."""
         if not sessions:
             if os.path.exists(filepath):
                 os.remove(filepath)

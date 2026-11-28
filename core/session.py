@@ -18,6 +18,7 @@ class GameSession:
      last_move_timestamp: float | None
      
      def __init__(self, player_name: str, move_timeout: float = 60.0) -> None:
+          """Crée une session joueur avec son identifiant, son jeton et son état de jeu."""
           self.session_id = str(uuid.uuid4())
           self.auth_token = str(uuid.uuid4())
           self.player_name = player_name
@@ -39,6 +40,7 @@ class GameSession:
           self.disconnect_timestamp = time.time()
      
      def reconnect(self, auth_token: str) -> bool:
+          """Restaure la connexion si le jeton d'authentification est valide."""
           if not secrets.compare_digest(auth_token, self.auth_token):
                return False
           self.is_connected = True
@@ -46,12 +48,14 @@ class GameSession:
           return True
 
      def save_response(self, request_id: int, response: dict | Message) -> None:
+          """Mémorise une réponse pour rejouer une requête déjà traitée."""
           self.last_response = {
                "request_id": request_id,
                "response": response.serialize() if isinstance(response, Message) else response
                }
           
      def get_cached_response(self, request_id: int) -> dict | None:
+          """Retourne la dernière réponse mise en cache pour cet identifiant de requête."""
           if self.last_response is not None and self.last_response["request_id"] == request_id:
                return self.last_response["response"]
      
@@ -85,19 +89,24 @@ class GameSession:
           return max(0.0, self.move_timeout - elapsed)
 
 class SessionManager:
+     """Conserve les sessions actives ou temporairement suspendues du serveur."""
+
      sessions: dict[str, GameSession]
      timeout: float     
      def __init__(self, timeout: float = 60) -> None:
+          """Initialise le registre des sessions avec son délai d'expiration."""
           self.sessions = {}
           self.timeout = timeout
           
           
      def create_session(self, player_name: str, move_timeout: float = 60.0) -> GameSession:
+          """Crée une session joueur puis l'ajoute au registre."""
           session = GameSession(player_name, move_timeout=move_timeout)
           self.sessions[session.session_id] = session
           return session
      
      def get_session(self, session_id: str) -> GameSession | None:
+          """Retourne une session valide ou la supprime si elle a expiré."""
           x = self.sessions.get(session_id)
           if x and x.is_expired(self.timeout):
                del self.sessions[session_id]
@@ -105,11 +114,13 @@ class SessionManager:
           return x
      
      def clean_expired_sessions(self) -> None:
+          """Supprime toutes les sessions suspendues dont la reprise est expirée."""
           expired_sessions = [session_id for session_id, session in self.sessions.items() if session.is_expired(self.timeout)]
           for session_id in expired_sessions:
                del self.sessions[session_id]
      
      def remove_session(self, session_id: str) -> None:
+          """Supprime une session du registre lorsqu'elle est fermée."""
           if session_id in self.sessions:
                del self.sessions[session_id]
           

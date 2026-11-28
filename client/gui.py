@@ -50,6 +50,7 @@ def _w(kind, parent, pack=None, **kw):
 
 class HangmanApp:
     def __init__(self, root: ctk.CTk | None = None, client: GameClient | None = None) -> None:
+        """Initialise l’application, ses variables Tkinter et tous ses widgets."""
         if root is None:
             ctk.set_appearance_mode("dark")
             root = ctk.CTk()
@@ -93,84 +94,90 @@ class HangmanApp:
     # --- INTERFACE ---
 
     def _build_ui(self) -> None:
-            # Connexion
-            top = _w(ctk.CTkFrame, self.root, {"fill": "x", "padx": 8, "pady": 6}, fg_color="transparent")
-            _w(ctk.CTkLabel, top, text="Pseudo")
-            _w(ctk.CTkEntry, top, textvariable=self.pseudo_var, width=120).bind("<Return>", lambda _: self.connect_or_disconnect())
-            self.tls_label = _w(ctk.CTkLabel, top, text="TLS 🔒", text_color="#10B981", font=(MONO, 12, "bold"))
-            self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
-            self.discover_btn = _w(ctk.CTkButton, top, text="Découvrir", width=90, command=self.discover_local_servers)
-            self.session_info_label = _w(ctk.CTkLabel, self.root, {"anchor": "w", "padx": 10}, text="Déconnecté")
+        """Construit les onglets, boutons, affichages et contrôles de l’interface."""
+        # Connexion
+        top = _w(ctk.CTkFrame, self.root, {"fill": "x", "padx": 8, "pady": 6}, fg_color="transparent")
+        _w(ctk.CTkLabel, top, text="Pseudo")
+        _w(ctk.CTkEntry, top, textvariable=self.pseudo_var, width=120).bind("<Return>", lambda _: self.connect_or_disconnect())
+        self.tls_label = _w(ctk.CTkLabel, top, text="TLS 🔒", text_color="#10B981", font=(MONO, 12, "bold"))
+        self.connect_btn = _w(ctk.CTkButton, top, text="Connexion", width=100, command=self.connect_or_disconnect)
+        self.discover_btn = _w(ctk.CTkButton, top, text="Découvrir", width=90, command=self.discover_local_servers)
+        self.session_info_label = _w(ctk.CTkLabel, self.root, {"anchor": "w", "padx": 10}, text="Déconnecté")
 
-            self.tabview = _w(ctk.CTkTabview, self.root, {"fill": "both", "expand": True, "padx": 8, "pady": 4})
-            game, chat, log = (self.tabview.add(name) for name in ("Jeu", "Chat", "Réseau"))
+        self.tabview = _w(ctk.CTkTabview, self.root, {"fill": "both", "expand": True, "padx": 8, "pady": 4})
+        game, chat, log = (self.tabview.add(name) for name in ("Jeu", "Chat", "Réseau"))
 
-            # Onglet Jeu
-            self.hangman_label = _w(ctk.CTkLabel, game, {"pady": 4}, textvariable=self.hangman_var, font=(MONO, 14), justify="left")
-            self.word_label = _w(ctk.CTkLabel, game, {}, textvariable=self.word_var, font=(MONO, 32, "bold"))
-            _w(ctk.CTkLabel, game, {"pady": 2}, textvariable=self.theme_var, font=(MONO, 13, "bold"), text_color="#38BDF8")
-            stats = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
-            for var in (self.timer_var, self.lives_var, self.errors_var):
-                _w(ctk.CTkLabel, stats, {"side": "left", "padx": 10}, textvariable=var)
-            _w(ctk.CTkLabel, game, {}, textvariable=self.info_var)
-            self.keys_frame = _w(ctk.CTkFrame, game, {"pady": 6}, fg_color="transparent")
-            self.buttons: dict[str, ctk.CTkButton] = {}
-            for i, letter in enumerate(ascii_uppercase):
-                self.buttons[letter] = ctk.CTkButton(self.keys_frame, text=letter, width=40, command=lambda l=letter: self.play(l))
-                self.buttons[letter].grid(row=i // 9, column=i % 9, padx=2, pady=2)
-            self.actions_frame = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
-            _w(ctk.CTkLabel, self.actions_frame, text="Catégorie :")
-            self.category_menu = _w(ctk.CTkOptionMenu, self.actions_frame, variable=self.category_var, values=list(CATEGORIES.values()), width=190)
-            self.new_game_btn = _w(ctk.CTkButton, self.actions_frame, text="Nouvelle manche", command=self.start_new_game)
-            self.quit_btn = _w(ctk.CTkButton, self.actions_frame, text="Abandonner", command=self.quit_game)
-            duel_row = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
-            _w(ctk.CTkButton, duel_row, text="Créer un duel", command=self._create_duel_action)
-            self.duel_entry = _w(ctk.CTkEntry, duel_row, width=180, placeholder_text="Code du duel (3-12 lettres)")
-            _w(ctk.CTkButton, duel_row, text="Rejoindre", command=self._join_duel_action)
-            _w(ctk.CTkLabel, game, {"pady": 2}, textvariable=self.room_var, text_color="#9CA3AF")
-            self.board = _w(ctk.CTkFrame, game, {"fill": "both", "expand": True}, fg_color="transparent")
-            
+        # Onglet Jeu
+        self.hangman_label = _w(ctk.CTkLabel, game, {"pady": 4}, textvariable=self.hangman_var, font=(MONO, 14), justify="left")
+        self.word_label = _w(ctk.CTkLabel, game, {}, textvariable=self.word_var, font=(MONO, 32, "bold"))
+        _w(ctk.CTkLabel, game, {"pady": 2}, textvariable=self.theme_var, font=(MONO, 13, "bold"), text_color="#38BDF8")
+        stats = _w(ctk.CTkFrame, game, {}, fg_color="transparent")
+        for var in (self.timer_var, self.lives_var, self.errors_var):
+            _w(ctk.CTkLabel, stats, {"side": "left", "padx": 10}, textvariable=var)
+        _w(ctk.CTkLabel, game, {}, textvariable=self.info_var)
+        self.keys_frame = _w(ctk.CTkFrame, game, {"pady": 6}, fg_color="transparent")
+        self.buttons: dict[str, ctk.CTkButton] = {}
+        for i, letter in enumerate(ascii_uppercase):
+            self.buttons[letter] = ctk.CTkButton(self.keys_frame, text=letter, width=40, command=lambda l=letter: self.play(l))
+            self.buttons[letter].grid(row=i // 9, column=i % 9, padx=2, pady=2)
+        self.actions_frame = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
+        _w(ctk.CTkLabel, self.actions_frame, text="Catégorie :")
+        self.category_menu = _w(ctk.CTkOptionMenu, self.actions_frame, variable=self.category_var, values=list(CATEGORIES.values()), width=190)
+        self.new_game_btn = _w(ctk.CTkButton, self.actions_frame, text="Nouvelle manche", command=self.start_new_game)
+        self.quit_btn = _w(ctk.CTkButton, self.actions_frame, text="Abandonner", command=self.quit_game)
+        duel_row = _w(ctk.CTkFrame, game, {"pady": 4}, fg_color="transparent")
+        _w(ctk.CTkButton, duel_row, text="Créer un duel", command=self._create_duel_action)
+        self.duel_entry = _w(ctk.CTkEntry, duel_row, width=180, placeholder_text="Code du duel (3-12 lettres)")
+        _w(ctk.CTkButton, duel_row, text="Rejoindre", command=self._join_duel_action)
+        _w(ctk.CTkLabel, game, {"pady": 2}, textvariable=self.room_var, text_color="#9CA3AF")
+        self.board = _w(ctk.CTkFrame, game, {"fill": "both", "expand": True}, fg_color="transparent")
 
-            # Onglet Chat (global uniquement)
-            self.chat_box = _w(ctk.CTkTextbox, chat, {"fill": "both", "expand": True, "pady": 4}, state="disabled")
-            send_row = _w(ctk.CTkFrame, chat, {"fill": "x"}, fg_color="transparent")
-            self.chat_entry = _w(ctk.CTkEntry, send_row, {"side": "left", "fill": "x", "expand": True},
-                                placeholder_text="Votre message...")
-            self.chat_entry.bind("<Return>", lambda _: self._send_chat_message())
-            _w(ctk.CTkButton, send_row, text="Envoyer", width=80, command=self._send_chat_message)
+        # Onglet Chat (global uniquement)
+        self.chat_box = _w(ctk.CTkTextbox, chat, {"fill": "both", "expand": True, "pady": 4}, state="disabled")
+        send_row = _w(ctk.CTkFrame, chat, {"fill": "x"}, fg_color="transparent")
+        self.chat_entry = _w(ctk.CTkEntry, send_row, {"side": "left", "fill": "x", "expand": True},
+                            placeholder_text="Votre message...")
+        self.chat_entry.bind("<Return>", lambda _: self._send_chat_message())
+        _w(ctk.CTkButton, send_row, text="Envoyer", width=80, command=self._send_chat_message)
 
-            # Onglet Réseau (inspecteur de trames)
-            _w(ctk.CTkButton, log, {"anchor": "e"}, text="Effacer", width=80, command=self._clear_logs)
-            self.log_text = _w(ctk.CTkTextbox, log, {"fill": "both", "expand": True}, font=(MONO, 12))
-            self.hangman_label.pack_forget()
-            self.keys_frame.pack_forget()
-            self.board.pack_forget()
-            self._keys(state="disabled")
+        # Onglet Réseau (inspecteur de trames)
+        _w(ctk.CTkButton, log, {"anchor": "e"}, text="Effacer", width=80, command=self._clear_logs)
+        self.log_text = _w(ctk.CTkTextbox, log, {"fill": "both", "expand": True}, font=(MONO, 12))
+        self.hangman_label.pack_forget()
+        self.keys_frame.pack_forget()
+        self.board.pack_forget()
+        self._keys(state="disabled")
 
     def _show_game_widgets(self) -> None:
+        """Affiche le pendu et le clavier lorsque une partie est active."""
         self.hangman_label.pack(pady=4, before=self.word_label)
         self.keys_frame.pack(pady=6, before=self.actions_frame)
 
     def _hide_game_widgets(self) -> None:
+        """Masque le pendu et le clavier hors partie active."""
         self.hangman_label.pack_forget()
         self.keys_frame.pack_forget()
 
     # --- STATUT, SESSION ---
 
     def _status(self, text: str) -> None:
+        """Met à jour la barre d'état de la session."""
         self.session_info_label.configure(text=text)
 
     def _mark_connected(self) -> None:
+        """Affiche les informations de connexion et change le bouton associé."""
         c = self.client
         self.connect_btn.configure(text="Déconnecter")
         self._status(f"Connecté à {c.host}:{c.port} | Session : {(c.session_id or '')[:8]}... | Joueur : {c.player_name}")
 
     def _check_saved_session(self) -> None:
+        """Annonce les sessions enregistrées disponibles au démarrage."""
         sessions = self.client._read_sessions("session.json")
         if sessions:
             self._status(f"Sessions disponibles : {', '.join(sessions)}")
 
     def _target(self) -> tuple[str, int] | None:
+        """Retourne l'hôte et le port sélectionnés après validation."""
         try:
             return self.host_var.get().strip() or "127.0.0.1", int(self.port_var.get())
         except ValueError:
@@ -197,6 +204,7 @@ class HangmanApp:
         return resp
 
     def _read_port(self) -> int | None:
+        """Lit et valide le numéro de port saisi."""
         try:
             return int(self.port_var.get())
         except ValueError:
@@ -206,6 +214,7 @@ class HangmanApp:
     # --- CONNEXION, REPRISE, DÉCOUVERTE ---
 
     def connect_or_disconnect(self) -> None:
+        """Connecte l'utilisateur ou ferme sa connexion selon l'état actuel."""
         if self.client.is_connected():
             self.client.close()
             self.connect_btn.configure(text="Connexion")
@@ -215,6 +224,7 @@ class HangmanApp:
             self._login()
 
     def _login(self) -> None:
+        """Reprend une session enregistrée ou crée une nouvelle connexion."""
         port = self._read_port()
         if port is None:
             return
@@ -237,6 +247,7 @@ class HangmanApp:
 
 
     def resume_existing_session(self) -> None:
+        """Retrouve une session locale puis demande sa reprise au serveur."""
         port = self._read_port()
         if port is None:
             return
@@ -256,9 +267,11 @@ class HangmanApp:
             self.update_from_state(resp)
 
     def discover_local_servers(self) -> None:
+        """Lance la découverte réseau dans un thread séparé."""
         self.discover_btn.configure(state="disabled", text="Recherche...")
 
         def work() -> None:
+            """Effectue la recherche puis transmet son résultat à l'interface."""
             try:
                 result = discover_servers(timeout=1.2)
             except Exception as exc:
@@ -268,6 +281,7 @@ class HangmanApp:
         threading.Thread(target=work, daemon=True).start()
 
     def _on_discovered(self, result) -> None:
+        """Affiche les serveurs trouvés ou les erreurs de découverte."""
         self.discover_btn.configure(state="normal", text="Découvrir")
         if isinstance(result, Exception):
             messagebox.showerror("Découverte", str(result))
@@ -284,6 +298,7 @@ class HangmanApp:
                               command=lambda s=s: (self._apply_server(s), dialog.destroy())).pack(padx=10, pady=4)
 
     def _apply_server(self, s: dict) -> None:
+        """Applique les paramètres réseau du serveur découvert."""
         self.selected_endpoints = s["endpoints"]
         self.port_var.set(str(s["port"]))
         self.client.use_tls = True
@@ -292,6 +307,7 @@ class HangmanApp:
     # --- PARTIE ---
 
     def _get_selected_category_id(self) -> int | None:
+        """Convertit la catégorie affichée en identifiant envoyé au serveur."""
         selected_name = self.category_var.get()
         for cat_id, name in CATEGORIES.items():
             if name == selected_name and cat_id > 0:
@@ -299,6 +315,7 @@ class HangmanApp:
         return None
 
     def start_new_game(self) -> None:
+        """Démarre une partie solo avec la catégorie choisie."""
         if not self.client.is_connected() or not self.client.session_id:
             self.client.close()
             self._login()
@@ -309,6 +326,7 @@ class HangmanApp:
             self.update_from_state(resp)
 
     def play(self, letter: str) -> None:
+        """Envoie une lettre au serveur et actualise l'affichage reçu."""
         resp = self._do(self.controller.guess, letter.upper())
         if resp is not None and resp.type in ("DUEL", "DUEL_END"):
             self._show_duel(resp.payload)
@@ -318,6 +336,7 @@ class HangmanApp:
             self.update_from_state(resp)
 
     def quit_game(self) -> None:
+        """Demande confirmation puis abandonne et clôture la partie."""
         if not messagebox.askyesno("Abandonner", "Voulez-vous vraiment abandonner la partie ?"):
             return
         if self._do(self.controller.quit_game) is None:
@@ -352,6 +371,7 @@ class HangmanApp:
         return status
 
     def update_from_state(self, resp) -> None:
+        """Synchronise les widgets avec une réponse d'état de partie."""
         p = resp.payload
         if p.get("status") == "EN_COURS":
             self._keys(state="normal", fg_color=THEME["key"])
@@ -390,6 +410,7 @@ class HangmanApp:
             self.new_game_btn.configure(state="disabled", fg_color=THEME["disabled"])
 
     def _end_game(self, p: dict, status: str) -> None:
+        """Arrête la partie terminée et affiche son résultat."""
         elapsed = self._stop_timer()
         self._keys(state="disabled")
         self._hide_game_widgets()
@@ -400,13 +421,16 @@ class HangmanApp:
         messagebox.showinfo("Fin de partie", text)
 
     def _keys(self, **config) -> None:
+        """Applique une configuration commune à toutes les touches."""
         for button in self.buttons.values():
             button.configure(**config)
 
     def _disable_key(self, letter: str, fg: str, text: str) -> None:
+        """Désactive une lettre déjà proposée avec sa couleur de résultat."""
         self.buttons[letter].configure(state="disabled", fg_color=fg, text_color=text)
 
     def _show_hangman(self, errors_made: int, status: str | None = None) -> None:
+        """Sélectionne le dessin du pendu correspondant aux erreurs."""
         text = HANGMAN_STAGES[min(errors_made, len(HANGMAN_STAGES) - 1)]
         self.hangman_var.set(text + ("\n   Gagné !" if status == "GAGNE" else ""))
 
@@ -423,10 +447,12 @@ class HangmanApp:
 
     @staticmethod
     def _format_elapsed(elapsed: float) -> str:
+        """Formate une durée en minutes et secondes."""
         minutes, seconds = divmod(int(elapsed), 60)
         return f"{minutes:02d}:{seconds:02d}"
 
     def _start_timer(self) -> None:
+        """Démarre ou redémarre le chronomètre de la partie."""
         if self._timer_after_id is not None:
             self.root.after_cancel(self._timer_after_id)
         self._timer_started_at = time.monotonic()
@@ -434,6 +460,7 @@ class HangmanApp:
         self._timer_after_id = self.root.after(200, self._tick_timer)
 
     def _tick_timer(self) -> None:
+        """Actualise périodiquement le temps écoulé."""
         self._timer_after_id = None
         if self._timer_started_at is None:
             return
@@ -442,6 +469,7 @@ class HangmanApp:
         self._timer_after_id = self.root.after(200, self._tick_timer)
 
     def _stop_timer(self) -> str | None:
+        """Arrête le chronomètre et retourne la durée finale."""
         if self._timer_started_at is None:
             return None
         elapsed = self._format_elapsed(time.monotonic() - self._timer_started_at)
@@ -459,6 +487,7 @@ class HangmanApp:
         return [m for m in self.chat_history if m["scope"] == "global"]
 
     def _refresh_chat_display(self) -> None:
+        """Reconstruit la zone de chat à partir des messages visibles."""
         self.chat_box.configure(state="normal")
         self.chat_box.delete("1.0", "end")
         for m in self._visible_messages():
@@ -477,6 +506,7 @@ class HangmanApp:
         self._refresh_chat_display()
 
     def _send_chat_message(self) -> None:
+        """Lit le message saisi, l'envoie au serveur et affiche son retour."""
         text = self.chat_entry.get().strip()
         if not text:
             return
@@ -488,10 +518,12 @@ class HangmanApp:
     # --- LOGS RÉSEAU, BOUCLES PÉRIODIQUES ---
 
     def log_network_event(self, direction: str, text: str) -> None:
+        """Ajoute une trame réseau à l'onglet d'inspection."""
         self.log_text.insert("end", f"[{direction}] {text}\n")
         self.log_text.see("end")
 
     def _clear_logs(self) -> None:
+        """Efface toutes les trames affichées dans l'inspecteur réseau."""
         self.log_text.delete("1.0", "end")
 
     def _process_gui_queue(self) -> None:
@@ -501,7 +533,7 @@ class HangmanApp:
         self.root.after(30, self._process_gui_queue)
 
     def _refresh(self) -> None:
-        """Relit le réseau sans bloquer (chat en direct), puis se reprogramme."""
+        """Relit les messages poussés sans bloquer, puis se reprogramme."""
         try:
             for message in self.controller.poll():
                 if message.get("type") in ("DUEL_STATE", "DUEL_END"):
@@ -516,12 +548,14 @@ class HangmanApp:
         self.root.after(200, self._refresh)
 
     def _on_close(self) -> None:
+        """Sauvegarde la session active, ferme la connexion puis la fenêtre."""
         if self.client.is_connected() and self.client.player_name and self.client.session_id:
             self.client.save_session("session.json")   # met à jour last_seen
         self.client.close()
         self.root.destroy()
 
     def _create_duel_action(self) -> None:
+        """Valide le code choisi puis demande au serveur de créer le duel."""
         duel_id = self.duel_entry.get().strip().upper()
         if not duel_id:
             messagebox.showwarning("Créer un duel", "Choisissez un code de 3 à 12 lettres.")
@@ -551,6 +585,7 @@ class HangmanApp:
         messagebox.showinfo("Duel créé", f"Duel créé avec le code :\n\n{self._duel_id}\n\nVotre adversaire doit saisir ce même code.")
 
     def _join_duel_action(self) -> None:
+        """Demande au serveur de rejoindre le duel correspondant au code saisi."""
         duel_id = self.duel_entry.get().strip().upper()
         if not duel_id:
             messagebox.showwarning(
@@ -569,6 +604,7 @@ class HangmanApp:
         messagebox.showinfo("Duel rejoint", "Vous avez rejoint la partie !")
 
     def _show_duel(self, p: dict) -> None:
+        """Synchronise l'affichage complet et le tour courant d'un duel."""
         status = p.get("status", "INCONNU")
         players = " vs ".join(p.get("players", [])) or "Joueurs en attente"
         turn = p.get("turn")
@@ -613,6 +649,7 @@ class HangmanApp:
 
 
 def main() -> None:
+    """Crée la fenêtre principale puis lance la boucle Tkinter."""
     ctk.set_appearance_mode("dark")
     root = ctk.CTk()
     HangmanApp(root)

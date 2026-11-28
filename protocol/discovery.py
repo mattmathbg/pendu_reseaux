@@ -45,6 +45,7 @@ class DiscoveryServer:
         use_tls: bool = False,
         get_players_count: Callable[[], int] | None = None,
     ) -> None:
+        """Configure les ports, métadonnées et compteurs utilisés par la découverte."""
         self.tcp_port = tcp_port
         self.server_name = server_name
         self.discovery_port = discovery_port

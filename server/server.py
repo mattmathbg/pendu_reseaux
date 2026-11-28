@@ -34,6 +34,7 @@ from pathlib import Path
 from server.duel import Duel, DuelError, FORFAIT_DELAY
 
 def create_server_ssl_context(cert_dir: str = "certs") -> ssl.SSLContext:
+    """Charge le certificat et la clé TLS utilisés pour accepter les clients."""
     path = Path(cert_dir)
     if not path.exists():
         root_alt = Path(__file__).resolve().parent.parent / cert_dir
@@ -54,6 +55,8 @@ def create_server_ssl_context(cert_dir: str = "certs") -> ssl.SSLContext:
     return context
 
 class Server:
+    """Serveur réseau du pendu avec sessions, salons, parties et duels."""
+
     def __init__(
         self,
         host: str | list[str] | None = None,
@@ -63,6 +66,7 @@ class Server:
         enable_discovery: bool = True,
         move_timeout: float = 60.0,
     ) -> None:
+        """Configure les paramètres réseau, les sessions et les gestionnaires de messages."""
         # Par défaut, écoute sur toutes les interfaces réseau (Dual-Stack IPv4 et IPv6)
         if host is None:
             self.host = ["0.0.0.0", "::"]
@@ -260,6 +264,7 @@ class Server:
         return response, current_session
 
     async def _handle_hello(self, msg: Message) -> tuple[Message, GameSession]:
+        """Crée une session pour un nouveau joueur et renvoie ses identifiants."""
         player_name = msg.payload.get("player_name", "Anonyme")
         session = self.sessions.create_session(player_name, move_timeout=self.move_timeout)
         response = Message(
@@ -275,6 +280,7 @@ class Server:
         return response, session
 
     async def _handle_resume(self, msg: Message) -> tuple[Message, GameSession | None]:
+        """Vérifie les identifiants puis restaure une session suspendue."""
         session_id = msg.session_id
         auth_token = msg.payload.get("auth_token", "")
 
@@ -317,6 +323,7 @@ class Server:
         return response, session
 
     async def _handle_new_game(self, msg: Message, session: GameSession) -> Message:
+        """Démarre une partie solo avec une catégorie optionnelle."""
         if session.game is not None and not session.game.is_finished():
             return Message(
                 type="ERROR",
@@ -336,6 +343,7 @@ class Server:
         return self._build_state_message(msg.request_id, session)
 
     async def _handle_letter(self, msg: Message, session: GameSession) -> Message:
+        """Aiguillle une lettre vers le duel actif ou vers la partie solo."""
         if session.duel is not None:
             return await self._handle_duel_letter(msg, session)
         if session.game is None:
@@ -384,6 +392,7 @@ class Server:
                         )
 
     async def _handle_quit(self, msg: Message, session: GameSession) -> Message:
+        """Abandonne la partie en cours et supprime la session du joueur."""
         if session.game and not session.game.is_finished():
             session.game.abandon()
         self.sessions.remove_session(session.session_id)
@@ -414,6 +423,7 @@ class Server:
         return payload
 
     def _build_state_message(self, request_id: int, session: GameSession) -> Message:
+        """Construit une réponse de type STATE contenant la projection complète de partie."""
         return Message(
             type="STATE",
             request_id=request_id,
@@ -461,6 +471,7 @@ class Server:
                 pass
 
     async def _handle_join_room(self, msg: Message, session: GameSession) -> Message:
+        """Valide le nom de salon puis associe le joueur à ce salon."""
         room = msg.payload.get("room")
         if not isinstance(room, str) or not (1 <= len(room) <= 20):
             return Message(
@@ -479,6 +490,7 @@ class Server:
         )
 
     async def _handle_leave_room(self, msg: Message, session: GameSession) -> Message:
+        """Retire le joueur de son salon courant."""
         session.room_id = None
         return Message(
             type="ROOM",
@@ -489,6 +501,7 @@ class Server:
 
 
     async def _handle_chat(self, msg: Message, session: GameSession) -> Message:
+        """Valide et distribue un message global ou à un salon."""
         text = msg.payload.get("text")
         if not isinstance(text, str) or not (1 <= len(text.strip()) <= 200):
             return Message(
@@ -542,6 +555,7 @@ class Server:
         )
     
     async def _handle_create_duel(self, msg: Message, session: GameSession) -> Message:
+        """Crée un duel en attente à partir du code demandé par le joueur."""
         if session.duel is not None:
             return self._duel_error("INVALID_STATE", "Vous êtes déjà dans un duel.", msg, session)
         requested_id = msg.payload.get("duel_id")
@@ -567,14 +581,17 @@ class Server:
         return self._duel_message("DUEL", msg.request_id, session, duel)
 
     def _duel_message(self, msg_type: str, request_id: int, session: GameSession, duel: Duel) -> Message:
+        """Construit une réponse réseau contenant l'état projeté du duel."""
         return Message(type=msg_type, request_id=request_id,
                        session_id=session.session_id, payload=duel.to_payload())
 
     def _duel_error(self, code: str, text: str, msg: Message, session: GameSession) -> Message:
+        """Construit une erreur protocolaire liée à une action de duel."""
         return Message(type="ERROR", request_id=msg.request_id, session_id=session.session_id,
                        payload={"code": code, "message": text})
 
     async def _handle_join_duel(self, msg: Message, session: GameSession) -> Message:
+        """Recherche un duel par code puis démarre la partie avec le second joueur."""
         if session.duel is not None:
             return self._duel_error("INVALID_STATE", "Vous êtes déjà dans un duel.", msg, session)
         requested_id = msg.payload.get("duel_id", "")
@@ -597,6 +614,7 @@ class Server:
         return self._duel_message("DUEL", msg.request_id, session, duel)
 
     async def _handle_duel_letter(self, msg: Message, session: GameSession) -> Message:
+        """Traite une proposition de lettre et informe les deux joueurs du résultat."""
         duel = session.duel
         try:
             duel.play(session, msg.payload.get("letter", ""))
@@ -647,6 +665,7 @@ class Server:
     async def _forfeit_after_disconnect(
         self, duel: Duel, session: GameSession, disconnect_timestamp: float
     ) -> None:
+        """Accorde le délai de reprise puis déclare un forfait si le joueur ne revient pas."""
         await asyncio.sleep(FORFAIT_DELAY)
         if (
             self.duels.get(duel.duel_id) is not duel
@@ -658,6 +677,7 @@ class Server:
         await self.check_duel_forfeits(now=time())
 
     def _end_duel(self, duel: Duel) -> None:
+        """Détache les joueurs du duel terminé et retire celui-ci du registre."""
         for player in duel.players:
             player.duel = None
         self.duels.pop(duel.duel_id, None)
